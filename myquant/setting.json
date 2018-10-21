@@ -1,0 +1,26 @@
+{
+  "fontFamily": "微软雅黑",
+  "fontSize": 12,
+  "mongoHost": "localhost",
+  "mongoPort": 27017,
+  "mongoLogging": true,
+  "darkStyle": true,
+  "language": "chinese",
+  "logActive": true,
+  "logLevel": "debug",
+  "logConsole": true,
+  "logFile": true,
+  "tdPenalty": [
+    "IF",
+    "IH",
+    "IC"
+  ],
+  "active": true,
+  "orderFlowLimit": 50,
+  "orderFlowClear": 1,
+  "orderSizeLimit": 99,
+  "tradeLimit": 997,
+  "workingOrderLimit": 20,
+  "orderCancelLimit": 16,
+  "marginRatioLimit": 0.95
+}

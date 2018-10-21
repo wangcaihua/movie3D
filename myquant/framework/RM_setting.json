@@ -1,0 +1,10 @@
+{
+    "active": true,
+    "orderFlowLimit": 50,
+    "orderFlowClear": 1,
+    "orderSizeLimit": 99,
+    "tradeLimit": 997,
+    "workingOrderLimit": 20,
+    "orderCancelLimit": 16,
+    "marginRatioLimit": 0.95
+}
