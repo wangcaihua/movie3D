@@ -9,4 +9,5 @@ stockstar.iml
 .env
 
 .DS_Store
+*.db
 
