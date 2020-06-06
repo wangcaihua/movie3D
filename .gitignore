@@ -7,5 +7,6 @@ stockstar.iml
 .vscode
 .ipynb_checkpoints
 .env
+
 .DS_Store
 
