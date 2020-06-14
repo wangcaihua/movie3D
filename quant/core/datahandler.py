@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import pandas as pd
+from typing import Optional
+from enum import Enum
 from abc import ABCMeta, abstractmethod
+
+SField = Enum('SField', ('name', 'lot_size', 'stock_type', 'listing_date', 'plate_name', 'plate_id'))
+KField = Enum('KField', ("code", "time_key", "open", "close", "high", "low", "pe_ratio",
+                         "turnover_rate", "volume", "turnover", "change_rate", "last_close"))
 
 
 class DataHandler(object, metaclass=ABCMeta):
@@ -22,7 +28,7 @@ class DataHandler(object, metaclass=ABCMeta):
         self.events = events
         self.start_date = start_date
         self.symbol_list = symbol_list
-        self.snapshot: pd.DataFrame = None
+        self.snapshot: Optional[pd.DataFrame] = None
         self.hist_snapshots = []
 
         self.tfmt = '%Y-%m-%d'
@@ -45,23 +51,22 @@ class DataHandler(object, metaclass=ABCMeta):
         """
         return self.cur_datetime
 
-    def get_latest_bar_value(self, symbol, val_type):
+    def get_latest_bar_value(self, symbol, field: KField):
         """
         Returns one of the Open, High, Low, Close, Volume or OI
         from the last bar.
         """
-        assert val_type in self.snapshot.columns
-        return self.snapshot.loc[symbol, val_type]
+        return self.snapshot.loc[symbol, field.nane]
 
     @abstractmethod
-    def get_latest_bars(self, symbol, n=1) -> pd.DataFrame:
+    def get_latest_bars(self, symbol: str, n: int, include_last: bool) -> pd.DataFrame:
         """
         Returns the last N bars updated.
         """
         raise NotImplementedError("Should implement get_latest_bars()")
 
     @abstractmethod
-    def get_latest_bars_values(self, symbol, val_type, n=1):
+    def get_latest_bars_values(self, symbol: str, val_type: KField, n: int, include_last: bool) -> pd.Series:
         """
         Returns the last N bar values from the 
         latest_symbol list, or N-k if less available.

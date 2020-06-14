@@ -2,31 +2,33 @@
 # -*- coding: utf-8 -*-
 
 from datetime import datetime
-from typing import Union, List
+from typing import Dict, List, Union
 
 __all__ = ['DataEvent', 'MarketEvent', 'Signal', 'SignalEvent', 'OrderEvent', 'FillEvent']
 
 
 class Event(object):
     """
-    Event is base class providing an interface for all subsequent 
-    (inherited) events, that will trigger further events in the 
-    trading infrastructure.   
+    Event is base class providing an interface for all subsequent
+    (inherited) events, that will trigger further events in the
+    trading infrastructure.
     """
     pass
 
 
 class DataEvent(Event):
-    def __init__(self, cur_timestamp: datetime):
+    def __init__(self, timestamp: datetime = None):
         """
         Initialises the DataEvent.
         """
-        self.cur_timestamp = cur_timestamp
+        if timestamp is None:
+            timestamp = datetime.today()
+        self.timestamp = timestamp
 
 
 class MarketEvent(Event):
     """
-    Handles the event of receiving a new market update with 
+    Handles the event of receiving a new market update with
     corresponding bars.
     """
 
@@ -41,10 +43,30 @@ class MarketEvent(Event):
 
 
 class Signal(object):
-    def __init__(self, symbol: str, signal_type: str, strength: float):
+    OpenLong = "OpenLong"
+    OpenShort = "OpenShort"
+    Extend = "Extend"
+    Lighten = "Lighten"
+    Close = "Close"
+    SignalTypes = {
+        OpenLong: 0,
+        OpenShort: 0,
+        Extend: 2,
+        Lighten: 2,
+        Close: 4
+    }
+
+    def __init__(self, symbol: str, signal_type: str, confidence: float, attr: dict = None):
+        assert signal_type in Signal.SignalTypes
+
         self.symbol: str = symbol
         self.signal_type: str = signal_type
-        self.strength: float = strength
+        self.confidence: float = confidence
+        self.attr = attr
+
+    @classmethod
+    def cmp_key(cls, signal) -> float:
+        return cls.SignalTypes[signal.signal_type] + signal.confidence
 
 
 class SignalEvent(Event):
@@ -53,7 +75,7 @@ class SignalEvent(Event):
     信号中不包括买卖的数量, 因为数量与lot_size, 仓位, 风险控制相关
     """
 
-    def __init__(self, strategy_id: str, timestamp: datetime, signals: Union[Signal, List[Signal]]):
+    def __init__(self, timestamp: datetime, signals: List[Signal]):
         """
         Initialises the SignalEvent.
 
@@ -64,10 +86,8 @@ class SignalEvent(Event):
         signal_type - 做空或做多, 即'LONG' 或 'SHORT'.
         strength - 用于标识信号的强弱, 也可以理解为信号的置信度.
         """
-        self.strategy_id: str = strategy_id
-        self.event_type: str = 'Singular' if isinstance(signals, Signal) else 'Composed'
         self.timestamp: datetime = timestamp
-        self.signals: Union[Signal, List[Signal]] = signals
+        self.signals: List[Signal] = signals
 
 
 class OrderEvent(Event):
@@ -76,15 +96,23 @@ class OrderEvent(Event):
     The order contains a symbol (e.g. GOOG), a type (market or limit),
     quantity and a direction.
     """
+    MKT = 'MKT'
+    LMT = 'LMT'
+    order_types = {MKT: 0, LMT: 1}
 
-    def __init__(self, symbol: str, order_type: str, quantity: int, direction: str):
+    BUY = 'BUY'
+    SELL = 'SELL'
+    directions = {BUY: 0, SELL: 1}
+
+    def __init__(self, timestamp: datetime, symbol: str, order_type: str, quantity: int, direction: str,
+                 attr: dict = None):
         """
         Initialises the order type, setting whether it is
         a Market order ('MKT') or Limit order ('LMT'), has
         a quantity (integral) and its direction ('BUY' or
         'SELL').
 
-        TODO: Must handle error checking here to obtain 
+        TODO: Must handle error checking here to obtain
         rational orders (i.e. no negative quantities etc).
 
         Parameters:
@@ -93,10 +121,12 @@ class OrderEvent(Event):
         quantity - Non-negative integer for quantity.
         direction - 'BUY' or 'SELL' for long or short.
         """
+        self.timestamp = timestamp
         self.symbol: str = symbol
         self.order_type: str = order_type
         self.quantity: int = quantity
         self.direction: str = direction
+        self.attr: dict = attr
 
     def print_order(self):
         """
@@ -114,17 +144,20 @@ class FillEvent(Event):
     from a brokerage. Stores the quantity of an instrument
     actually filled and at what price. In addition, stores
     the commission of the trade from the brokerage.
-    
+
     TODO: Currently does not support filling positions at
     different prices. This will be simulated by averaging
     the cost.
     """
+    BUY = 'BUY'
+    SELL = 'SELL'
+    directions = {BUY: 0, SELL: 1}
 
     def __init__(self, timestamp: datetime, symbol: str, exchange: float, quantity: int,
-                 direction: str, fill_cost: float, commission: float = None):
+                 direction: str, fill_cost: float, attr: dict = None, commission: float = None):
         """
         Initialises the FillEvent object. Sets the symbol, exchange,
-        quantity, direction, cost of fill and an optional 
+        quantity, direction, cost of fill and an optional
         commission.
 
         If commission is not provided, the Fill object will
@@ -132,7 +165,7 @@ class FillEvent(Event):
         Brokers fees.
 
         Parameters:
-        timeindex - The bar-resolution when the order was filled.
+        timestamp - The bar-resolution when the order was filled.
         symbol - The instrument which was filled.
         exchange - The exchange where the order was filled.
         quantity - The filled quantity.
@@ -146,6 +179,7 @@ class FillEvent(Event):
         self.quantity: int = quantity
         self.direction: str = direction
         self.fill_cost: float = fill_cost
+        self.attr = attr
 
         # Calculate commission
         if commission is None:

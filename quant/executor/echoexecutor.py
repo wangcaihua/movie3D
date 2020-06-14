@@ -2,8 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+from typing import cast
+
+from quant.core.datahandler import KField
 from quant.core.execution import ExecutionHandler
 from quant.core.event import OrderEvent, FillEvent
+from quant.core.portfolio import Portfolio
+from quant.data.sqlitedatahandler import SQLiteDataHandler
 
 
 class EchoExecutionHandler(ExecutionHandler):
@@ -16,8 +21,8 @@ class EchoExecutionHandler(ExecutionHandler):
     before implementation with a more sophisticated execution
     handler.
     """
-    
-    def __init__(self, events):
+
+    def __init__(self, portfolio: Portfolio):
         """
         Initialises the handler, setting the event queues
         up internally.
@@ -25,9 +30,10 @@ class EchoExecutionHandler(ExecutionHandler):
         Parameters:
         events - The Queue of Event objects.
         """
-        self.events = events
+        super(EchoExecutionHandler, self).__init__(portfolio)
+        self.data_handler: SQLiteDataHandler = cast(SQLiteDataHandler, self.data_handler)
 
-    def on_order(self, event:OrderEvent):
+    def on_order(self, event: OrderEvent):
         """
         Simply converts Order objects into Fill objects naively,
         i.e. without any latency, slippage or fill ratio problems.
@@ -35,9 +41,11 @@ class EchoExecutionHandler(ExecutionHandler):
         Parameters:
         event - Contains an Event object with order information.
         """
-        if event.type == 'ORDER':
-            fill_event = FillEvent(
-                datetime.datetime.utcnow(), event.symbol,
-                'ARCA', event.quantity, event.direction, None
-            )
-            self.events.put(fill_event)
+
+        symbol = event.symbol
+        fill_cost = self.data_handler.get_latest_bar_value(symbol, KField.close)
+        direction = 1 if event.direction == OrderEvent.BUY else -1
+        fill_event = FillEvent(event.timestamp, symbol, exchange=1.0, quantity=direction * event.quantity,
+                               direction=event.direction, fill_cost=fill_cost, attr=event.attr)
+
+        self.events.put(fill_event)

@@ -3,14 +3,28 @@
 
 
 import queue
-import datetime
-import numpy as np
-import pandas as pd
-from queue import Queue
+from typing import List, Optional
 from abc import ABCMeta, abstractmethod
 
-from quant.core.event import DataEvent, SignalEvent
 from quant.core.datahandler import DataHandler
+from quant.core.portfolio import Portfolio
+from quant.core.event import DataEvent, Signal, SignalEvent
+
+
+class StrategyRule(object, metaclass=ABCMeta):
+    def __init__(self, portfolio: Portfolio):
+        self.portfolio: Portfolio = portfolio
+        self.events: queue.Queue = portfolio.events
+        self.symbol_list: List[str] = portfolio.symbol_list
+        self.data_handler: DataHandler = portfolio.data_handler
+
+    @property
+    def rule_id(self) -> str:
+        raise NotImplementedError("Should implement rule_id")
+
+    @abstractmethod
+    def handle(self, event: DataEvent) -> Optional[Signal]:
+        raise NotImplementedError("Should implement handle(event: DataEvent)")
 
 
 class Strategy(object, metaclass=ABCMeta):
@@ -27,14 +41,31 @@ class Strategy(object, metaclass=ABCMeta):
     since it obtains the bar tuples from a queue object.
     """
 
-    def __init__(self, datahandler:DataHandler, events:Queue):
-        self.datahandler:DataHandler=datahandler
-        self.events:Queue = events
+    def __init__(self, portfolio: Portfolio):
+        self.portfolio: Portfolio = portfolio
+        self.events: queue.Queue = portfolio.events
+        self.symbol_list: List[str] = portfolio.symbol_list
+        self.data_handler: DataHandler = portfolio.data_handler
+        self.rules: List[StrategyRule] = []
 
-    @abstractmethod
-    def on_data(self, event:DataEvent):
-        """
-        Provides the mechanisms to calculate the list of signals.
-        """
-        raise NotImplementedError("Should implement calculate_signals()")
+    def regiest(self, rule: StrategyRule):
+        self.rules.append(rule)
 
+    def on_data(self, event: DataEvent):
+        signals = {}
+        for rule in self.rules:
+            signal = rule.handle(event)
+            if signal is not None:
+                if signal.symbol in signals:
+                    signals[signal.symbol].append(signal)
+                else:
+                    signals[signal.symbol] = [signal]
+
+        deduplicated_signals = []
+        if signals:
+            for symbol in signals:
+                if len(signals[symbol]) > 1:
+                    signals[symbol].sort(key=Signal.cmp_key, reverse=True)
+                deduplicated_signals.append(signals[symbol][0])
+
+            self.events.put(SignalEvent(event.timestamp, deduplicated_signals))

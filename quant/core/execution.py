@@ -1,11 +1,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
 import queue
-import datetime
 from abc import ABCMeta, abstractmethod
+from typing import List
 
-from quant.core.event import FillEvent, OrderEvent
+from quant.core.datahandler import DataHandler
+from quant.core.event import OrderEvent
+from quant.core.portfolio import Portfolio
 
 
 class ExecutionHandler(object, metaclass=ABCMeta):
@@ -21,8 +22,14 @@ class ExecutionHandler(object, metaclass=ABCMeta):
     live trading engine.
     """
 
+    def __init__(self, portfolio: Portfolio):
+        self.portfolio: Portfolio = portfolio
+        self.events: queue.Queue = portfolio.events
+        self.symbol_list: List[str] = portfolio.symbol_list
+        self.data_handler: DataHandler = portfolio.data_handler
+
     @abstractmethod
-    def on_order(self, event:OrderEvent):
+    def on_order(self, event: OrderEvent):
         """
         Takes an Order event and executes it, producing
         a Fill event that gets placed onto the Events queue.

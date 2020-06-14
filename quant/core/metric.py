@@ -6,6 +6,7 @@ import pandas as pd
 
 __all__ = ['calc_alpha_beta', 'calc_sharpe_ratio', 'calc_sortino_ratio', 'calc_drawdowns']
 
+
 def calc_alpha_beta(returns, periods=252):
     pass
 
@@ -45,13 +46,12 @@ def calc_drawdowns(pnl):
 
     # Create the drawdown and duration series
     idx = pnl.index
-    drawdown = pd.Series(index = idx)
-    duration = pd.Series(index = idx)
+    drawdown = pd.Series(index=idx)
+    duration = pd.Series(index=idx)
 
     # Loop over the index range
     for t in range(1, len(idx)):
-        hwm.append(max(hwm[t-1], pnl[t]))
-        drawdown[t]= (hwm[t]-pnl[t])
-        duration[t]= (0 if drawdown[t] == 0 else duration[t-1]+1)
+        hwm.append(max(hwm[t - 1], pnl[t]))
+        drawdown[t] = (hwm[t] - pnl[t])
+        duration[t] = (0 if drawdown[t] == 0 else duration[t - 1] + 1)
     return drawdown, drawdown.max(), duration.max()
-

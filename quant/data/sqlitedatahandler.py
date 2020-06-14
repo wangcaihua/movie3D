@@ -1,12 +1,13 @@
 import sqlite3
-import os, os.path
 from futu import *
 from queue import Queue
 import pandas as pd
 from datetime import datetime, timedelta
 
 from quant.core.event import DataEvent
-from quant.core.datahandler import DataHandler
+from quant.core.datahandler import DataHandler, SField, KField
+
+from typing import Optional
 
 
 class SQLiteDataHandler(DataHandler):
@@ -25,7 +26,7 @@ class SQLiteDataHandler(DataHandler):
         if self.benchmark not in self.symbol_list:
             self.symbol_list.insert(0, self.benchmark)
 
-        self.basicinfo: pd.DataFrame = None
+        self.basicinfo: Optional[pd.DataFrame] = None
 
         # data base and futu initial
         print("start sqlite ...")
@@ -264,17 +265,32 @@ class SQLiteDataHandler(DataHandler):
         temp.set_index('code', inplace=True)
         self.basicinfo = temp
 
-    def get_latest_bars(self, symbol, n=1) -> pd.DataFrame:
-        if symbol in self.hist_kline:
-            return self.hist_kline[symbol].iloc[(self.hist_index - n + 1):(self.hist_index + 1)]
+    def get_lot_size(self, symbol) -> int:
+        if self.basicinfo is None:
+            raise ValueError('basicinfo is None')
         else:
-            ret, kline = self.quote_ctx.get_cur_kline(symbol, n, ktype=self.ktype, autype=self.autype)
-            assert ret == RET_OK
-            kline.set_index('time_key', inplace=True)
-            return kline
+            return self.basicinfo.loc[symbol, SField.lot_size()]
 
-    def get_latest_bars_values(self, symbol, val_type, n=1):
-        return self.get_latest_bars(symbol, n)[val_type]
+    def get_latest_bars(self, symbol: str, n: int, include_last: bool = False) -> pd.DataFrame:
+        if symbol in self.hist_kline:
+            if include_last:
+                return self.hist_kline[symbol].iloc[(self.hist_index - n + 1):(self.hist_index + 1)]
+            else:
+                return self.hist_kline[symbol].iloc[(self.hist_index - n):self.hist_index]
+        else:
+            if include_last:
+                ret, kline = self.quote_ctx.get_cur_kline(symbol, n, ktype=self.ktype, autype=self.autype)
+                assert ret == RET_OK
+                kline.set_index('time_key', inplace=True)
+                return kline
+            else:
+                ret, kline = self.quote_ctx.get_cur_kline(symbol, n + 1, ktype=self.ktype, autype=self.autype)
+                assert ret == RET_OK
+                kline.set_index('time_key', inplace=True)
+                return kline.iloc[0:-1]
+
+    def get_latest_bars_values(self, symbol: str, val_type: KField, n: int, include_last: bool = False) -> pd.Series:
+        return self.get_latest_bars(symbol, n, include_last)[val_type.name]
 
     def update_bars(self):
         if self.run_type == 'back_test':

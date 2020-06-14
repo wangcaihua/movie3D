@@ -21,6 +21,7 @@ class RiskManager(object, metaclass=ABCMeta):
         self.symbol_list: List[str] = portfolio.symbol_list
         self.data_handler: DataHandler = portfolio.data_handler
 
+    @abstractmethod
     def on_signal(self, event: SignalEvent):
         """
         Simply files an Order object as a constant quantity
@@ -28,25 +29,7 @@ class RiskManager(object, metaclass=ABCMeta):
         position sizing considerations.
 
         Parameters:
-        signal - The tuple containing Signal information.
+        event - The tuple containing Signal information.
         """
-        order = None
+        raise NotImplementedError("Should implement on_signal(event: SignalEvent)")
 
-        symbol = event.symbol
-        direction = event.signal_type
-        strength = event.strength
-
-        mkt_quantity = 100
-        cur_quantity = self.portfolio.current_positions[symbol]
-        order_type = 'MKT'
-
-        if direction == 'LONG' and cur_quantity == 0:
-            order = OrderEvent(symbol, order_type, mkt_quantity, 'BUY')
-        if direction == 'SHORT' and cur_quantity == 0:
-            order = OrderEvent(symbol, order_type, mkt_quantity, 'SELL')
-
-        if direction == 'EXIT' and cur_quantity > 0:
-            order = OrderEvent(symbol, order_type, abs(cur_quantity), 'SELL')
-        if direction == 'EXIT' and cur_quantity < 0:
-            order = OrderEvent(symbol, order_type, abs(cur_quantity), 'BUY')
-        return order
