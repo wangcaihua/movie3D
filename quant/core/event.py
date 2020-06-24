@@ -178,7 +178,7 @@ class FillEvent(Event):
         self.exchange: float = exchange
         self.quantity: int = quantity
         self.direction: str = direction
-        self.fill_cost: float = fill_cost
+        self.fill_price: float = fill_cost
         self.attr = attr
 
         # Calculate commission
