@@ -1,16 +1,10 @@
-import datetime
-import numpy as np
-import pandas as pd
-
-import talib
-
 from quant.core.datahandler import KField
 from quant.core.event import *
 from quant.core.strategy import StrategyRule
 from quant.core.portfolio import Portfolio
 from quant.data.sqlitedatahandler import SQLiteDataHandler
 
-from typing import Optional, List, cast
+from typing import Optional, cast
 
 
 class TurtleStrategy(StrategyRule):
@@ -51,14 +45,11 @@ class TurtleStrategy(StrategyRule):
 
         assert isinstance(event, DataEvent)
         for symbol in self.symbol_list:
-            symbol_kline: pd.DataFrame = self.data_handler.hist_kline[symbol]
-            if "atr" not in symbol_kline.columns:
-                # TR = max(H-L, H-PDC, PDC-L)
-                symbol_kline['atr'] = talib.ATR(symbol_kline['high'], symbol_kline['low'], symbol_kline['close'],
-                                                timeperiod=20)
+            if symbol in self.data_handler.plate_symbols or symbol == self.data_handler.benchmark:
+                return
 
             current_atr: float = self.data_handler.get_latest_bar_value(symbol, KField.atr)
-            current_close: float = self.data_handler.get_latest_bar_value(symbol, KField.close)
+            current_price: float = self.data_handler.get_latest_bar_value(symbol, KField.close)
 
             highest10: float = self.data_handler.get_latest_bars_values(symbol, KField.high, 10).max()
             lowest10: float = self.data_handler.get_latest_bars_values(symbol, KField.low, 10).min()
@@ -69,10 +60,11 @@ class TurtleStrategy(StrategyRule):
                 fist_fill = self.portfolio.get_first_fill_event(symbol)
                 last_fill = self.portfolio.get_last_fill_event(symbol)
                 hist_fill_events_len = self.portfolio.get_fill_events_len(symbol)
+                if hist_fill_events_len > 4:
+                    return None
+
                 if fist_fill.direction == FillEvent.BUY:
-                    if hist_fill_events_len > 4:
-                        return None
-                    elif 0.5 * fist_fill.attr['atr'] + last_fill.fill_cost <= current_close:
+                    if 0.5 * fist_fill.attr['atr'] + last_fill.fill_price <= current_price:
                         return Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
                             "index": self.data_handler.hist_index,
                             "atr": current_atr,
@@ -82,13 +74,13 @@ class TurtleStrategy(StrategyRule):
                         hold_days = self.data_handler.hist_index - fist_fill.attr['index']
                         hold_max = self.data_handler.get_latest_bars_values(symbol, KField.high, hold_days).max()
 
-                        if hold_max - 2 * fist_fill.attr['atr'] > current_close:
+                        if hold_max - 2 * fist_fill.attr['atr'] > current_price:
                             return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
                                 "rule_id": self.rule_id
                             })
-                        elif lowest10 > current_close:
+                        elif lowest10 > current_price:
                             return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
@@ -97,9 +89,7 @@ class TurtleStrategy(StrategyRule):
                         else:
                             return None
                 else:  # SELL
-                    if hist_fill_events_len > 4:
-                        return None
-                    elif last_fill.fill_cost - 0.5 * fist_fill.attr['atr'] >= current_close:
+                    if last_fill.fill_price - 0.5 * fist_fill.attr['atr'] >= current_price:
                         return Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
                             "index": self.data_handler.hist_index,
                             "atr": current_atr,
@@ -109,13 +99,13 @@ class TurtleStrategy(StrategyRule):
                         hold_days = self.data_handler.hist_index - fist_fill.attr['index']
                         hold_min = self.data_handler.get_latest_bars_values(symbol, KField.low, hold_days).min()
 
-                        if hold_min + 2 * fist_fill.attr['atr'] < current_close:
+                        if hold_min + 2 * fist_fill.attr['atr'] < current_price:
                             return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
                                 "rule_id": self.rule_id
                             })
-                        elif highest10 < current_close:
+                        elif highest10 < current_price:
                             return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
@@ -124,13 +114,13 @@ class TurtleStrategy(StrategyRule):
                         else:
                             return None
             else:  # open long/short
-                if current_close > highest20:
+                if current_price > highest20:
                     return Signal(symbol=symbol, signal_type=Signal.OpenLong, confidence=1.0, attr={
                         "index": self.data_handler.hist_index,
                         "atr": current_atr,
                         "rule_id": self.rule_id
                     })
-                elif current_close < lowest20:
+                elif current_price < lowest20:
                     return Signal(symbol=symbol, signal_type=Signal.OpenShort, confidence=1.0, attr={
                         "index": self.data_handler.hist_index,
                         "atr": current_atr,

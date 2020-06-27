@@ -5,7 +5,6 @@ import pandas as pd
 from queue import Queue
 from copy import deepcopy
 from datetime import datetime
-from collections import namedtuple
 
 from quant.core.event import *
 from quant.core.metric import *
@@ -63,7 +62,7 @@ class Holdings(object):
         else:
             return sum(self.holding.values()) + self.cash
 
-    def __deepcopy__(self):
+    def copy_and_create(self):
         holdings = Holdings(self.datahandler, self.fill_events, self.ratio,
                             self.cash, self.commission, self.interest_rate)
         holdings.position = deepcopy(self.position)
@@ -77,7 +76,7 @@ class Holdings(object):
         return symbol in self.position and self.position[symbol] != 0
 
     def _get_interest(self, fill: FillEvent):
-        fmt = '%Y-%m-%D'
+        fmt = '%Y-%m-%d'
         curr_date = datetime.strptime(fill.timestamp, fmt)
         interest = 0.0
         if fill.symbol in self.fill_events:
@@ -86,6 +85,11 @@ class Holdings(object):
                 interest += event.quantity * event.fill_price * (1 - self.ratio) * self.interest_rate * days
 
         return interest
+
+    def is_affordable(self, symbol: str, pos: int) -> bool:
+        net_value = self.datahandler.get_latest_bar_value(symbol, KField.close) * pos
+        est_commission = net_value * 0.01
+        return self.cash > net_value * self.ratio + est_commission
 
     def add(self, fill: FillEvent):
         if fill.symbol not in self.position[fill.symbol]:
@@ -110,6 +114,10 @@ class Holdings(object):
             self.dummy_cash[fill.symbol] -= this_deposit
         elif fill.direction == FillEvent.SELL and self.position[fill.symbol] > 0:
             # close long, lighten is not allowed
+            if abs(self.position[fill.symbol]) != fill.quantity:
+                print("lighten is not allowed")
+                return
+
             self.position[fill.symbol] -= fill.quantity
 
             # 卖股票所得
@@ -117,6 +125,7 @@ class Holdings(object):
 
             # 还融资
             stock_net_value += self.finance[fill.symbol]
+            self.cash -= self._get_interest(fill)  # 还利息
             self.finance[fill.symbol] = 0.0
 
             # 还dummy_cash
@@ -130,17 +139,14 @@ class Holdings(object):
             # 剩的放回现金库
             self.cash += stock_net_value
 
-            if self.position[fill.symbol] == 0:
-                # 平仓, 删除记录
-                del self.position[fill.symbol]
-                del self.deposit[fill.symbol]
-                del self.finance[fill.symbol]
-                del self.dummy_cash[fill.symbol]
-                self.cash -= self._get_interest(fill)
-            else:
+            if self.position[fill.symbol] != 0:
                 raise Exception("lighten is not allowed")
         elif fill.direction == FillEvent.BUY and self.position[fill.symbol] < 0:
-            # close short
+            # close short, lighten is not allowed
+            if abs(self.position[fill.symbol]) != fill.quantity:
+                print("lighten is not allowed")
+                return
+
             self.position[fill.symbol] += fill.quantity
 
             # 做空, 买回股票
@@ -148,6 +154,7 @@ class Holdings(object):
 
             # 做空, 还融资
             self.dummy_cash[fill.symbol] += self.finance[fill.symbol]
+            self.cash -= self._get_interest(fill)  # 还利息
             self.finance[fill.symbol] = 0.0
 
             # 做空, 取回保证金
@@ -157,16 +164,6 @@ class Holdings(object):
             # 剩的放回现金库
             self.cash += self.dummy_cash[fill.symbol]
             self.dummy_cash[fill.symbol] = 0.0
-
-            if self.position[fill.symbol] == 0:
-                # 平空仓, 删除记录
-                del self.position[fill.symbol]
-                del self.deposit[fill.symbol]
-                del self.finance[fill.symbol]
-                del self.dummy_cash[fill.symbol]
-                self.cash -= self._get_interest(fill)
-            else:
-                raise Exception("lighten is not allowed")
         elif fill.direction == FillEvent.SELL and self.position[fill.symbol] < 0:
             # extend short
             self.position[fill.symbol] -= fill.quantity
@@ -223,15 +220,20 @@ class Holdings(object):
         self.cash -= fill.commission
         self.commission += fill.commission
 
-        if fill.symbol in self.position:
+        if self.position[fill.symbol] == 0:
+            # 平仓, 删除记录
+            del self.position[fill.symbol]
+            del self.deposit[fill.symbol]
+            del self.finance[fill.symbol]
+            del self.dummy_cash[fill.symbol]
+            del self.fill_events[fill.symbol]
+        else:
             if fill.symbol in self.fill_events:
                 self.fill_events[fill.symbol].append(fill)
             else:
                 self.fill_events[fill.symbol] = [fill]
-        else:
-            del self.fill_events[fill.symbol]
 
-    def fix(self, cur_datetime: str):
+    def mk_snapshot(self, cur_datetime: str):
         self.datetime = cur_datetime
         for symbol in self.position:
             curr_mkt_value = self.position[symbol] * self.datahandler.get_latest_bar_value(symbol, KField.close)
@@ -239,7 +241,8 @@ class Holdings(object):
             self.holding[symbol] += self.finance[symbol] + self.dummy_cash[symbol]
 
     def to_dict(self):
-        temp = {symbol: self.holding[symbol] if symbol in self.holding else 0.0 for symbol in self.symbol_list}
+        temp = {symbol: self.holding[symbol] if symbol in self.holding else 0.0
+                for symbol in self.symbol_list}
         temp['cash'] = self.cash
         temp['datetime'] = self.datetime
         temp['total'] = self.total
@@ -303,21 +306,26 @@ class Portfolio(object):
 
         # Update positions
         # ================
-        self.current_holdings.fix(cur_datetime)
+        self.current_holdings.mk_snapshot(cur_datetime)
         self.all_holdings.append(self.current_holdings)
-        self.current_holdings = deepcopy(self.current_holdings)
+        self.current_holdings = self.current_holdings.copy_and_create()
 
     def has_position(self, symbol: str) -> bool:
         return symbol in self.current_holdings
 
-    def get_curr_position(self, sybmol: str) -> int:
+    def get_position(self, sybmol: str) -> int:
         return self.current_holdings.position[sybmol]
 
-    def get_curr_cash(self) -> float:
+    @property
+    def cash(self) -> float:
         return self.current_holdings.cash
 
-    def get_curr_total(self) -> float:
+    @property
+    def total(self) -> float:
         return self.current_holdings.total
+
+    def is_affordable(self, symbol: str, pos: int) -> bool:
+        return self.current_holdings.is_affordable(symbol, pos)
 
     def get_fill_events(self, symbol):
         if symbol in self.fill_events:

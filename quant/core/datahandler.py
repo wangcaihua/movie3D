@@ -7,7 +7,7 @@ from enum import Enum
 from abc import ABCMeta, abstractmethod
 
 SField = Enum('SField', ('name', 'lot_size', 'stock_type', 'listing_date', 'plate_name', 'plate_id'))
-KField = Enum('KField', ("code", "time_key", "open", "close", "high", "low", "pe_ratio",
+KField = Enum('KField', ("code", "time_key", "open", "close", "high", "low", "pe_ratio", "atr",
                          "turnover_rate", "volume", "turnover", "change_rate", "last_close"))
 
 
@@ -56,7 +56,7 @@ class DataHandler(object, metaclass=ABCMeta):
         Returns one of the Open, High, Low, Close, Volume or OI
         from the last bar.
         """
-        return self.snapshot.loc[symbol, field.nane]
+        return self.snapshot.loc[symbol, field.name]
 
     @abstractmethod
     def get_latest_bars(self, symbol: str, n: int, include_last: bool) -> pd.DataFrame:

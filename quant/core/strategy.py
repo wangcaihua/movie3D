@@ -48,7 +48,7 @@ class Strategy(object, metaclass=ABCMeta):
         self.data_handler: DataHandler = portfolio.data_handler
         self.rules: List[StrategyRule] = []
 
-    def regiest(self, rule: StrategyRule):
+    def regist(self, rule: StrategyRule):
         self.rules.append(rule)
 
     def on_data(self, event: DataEvent):

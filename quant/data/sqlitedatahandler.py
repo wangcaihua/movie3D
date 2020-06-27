@@ -1,4 +1,7 @@
 import sqlite3
+import datetime
+
+import talib
 from futu import *
 from queue import Queue
 import pandas as pd
@@ -7,25 +10,19 @@ from datetime import datetime, timedelta
 from quant.core.event import DataEvent
 from quant.core.datahandler import DataHandler, SField, KField
 
-from typing import Optional
+from typing import Optional, Set
 
 
 class SQLiteDataHandler(DataHandler):
     def __init__(self, symbol_list: list, events: Queue, start_date: str, run_type: str = "back_test",
-                 hist_kline_start: str = '2011-01-01', sqllite_db: str = 'stocks.db',
+                 hist_kline_start: str = '2011-01-01', sqllite_db: str = 'hist_data.db',
                  futu_host: str = '127.0.0.1', futu_port: int = 11111):
         super(SQLiteDataHandler, self).__init__(symbol_list, events, start_date)
         self.hist_kline_start: str = hist_kline_start
         self.hist_kline: dict = {}
         self.hist_index: int = -1
         self.hist_time_line: list = []
-
         self.run_type: str = run_type
-
-        self.benchmark: str = "HK.800000"  # 恒生指数
-        if self.benchmark not in self.symbol_list:
-            self.symbol_list.insert(0, self.benchmark)
-
         self.basicinfo: Optional[pd.DataFrame] = None
 
         # data base and futu initial
@@ -38,14 +35,40 @@ class SQLiteDataHandler(DataHandler):
         self.autype = AuType.QFQ
         self.quote_ctx: OpenQuoteContext = OpenQuoteContext(host=futu_host, port=futu_port)
 
+        self.benchmark: str = "HK.800000"  # 恒生指数
+        if self.benchmark not in self.symbol_list:
+            self.symbol_list.insert(0, self.benchmark)
+            temp = self.get_kline_from_futu(self.benchmark, hist_kline_start,
+                                            datetime.today().strftime(self.tfmt))
+            assert temp is not None
+            temp['time_key'] = temp.time_key.str[0:10]
+            temp.set_index('time_key', inplace=True)
+            temp[KField.atr.name] = talib.ATR(temp[KField.high.name],
+                                              temp[KField.low.name],
+                                              temp[KField.close.name], timeperiod=20)
+            self.hist_kline[self.benchmark] = temp
+
+        self._short_set: Optional[Set[str]] = None
+
+        ret, plate_list = self.quote_ctx.get_plate_list(Market.HK, Plate.ALL)
+        assert ret == RET_OK
+        self.plate_symbols: Set[str] = set(plate_list.code.to_list())
+
     def close(self):
         print("close sqlite ...")
         self.conn.close()
         print("close futu ...")
         self.quote_ctx.close()
 
+    def can_short(self, symbol) -> bool:
+        if self._short_set is None:
+            ret, data = self.quote_ctx.get_plate_stock(plate_code='HK.BK1000')
+            assert ret == RET_OK
+            self._short_set = set(data.code.to_list())
+        return symbol in self._short_set
+
     def init_hist_time_line(self):
-        if self.hist_time_line is None:
+        if len(self.hist_time_line) == 0:
             self.hist_time_line = self.hist_kline[self.benchmark].index.values.tolist()
 
         delta = timedelta(days=1)
@@ -64,7 +87,7 @@ class SQLiteDataHandler(DataHandler):
                 try:
                     snapshot.append(self.hist_kline[symbol].loc[self.cur_datetime])
                 except Exception as e:
-                    print(symbol + " maybe closed at " + self.cur_datetime)
+                    print(symbol + " maybe closed at " + self.cur_datetime + " : ")
 
             if snapshot:
                 snapshot = pd.DataFrame(snapshot)
@@ -258,6 +281,9 @@ class SQLiteDataHandler(DataHandler):
         for table in local_tables:
             temp = pd.read_sql(sql_read_table.format(table=table), self.conn)
             temp.set_index('time_key', inplace=True)
+            temp[KField.atr.name] = talib.ATR(temp[KField.high.name],
+                                              temp[KField.low.name],
+                                              temp[KField.close.name], timeperiod=20)
             self.hist_kline[table] = temp
 
     def load_basicinfo_from_local_db(self):
@@ -269,7 +295,7 @@ class SQLiteDataHandler(DataHandler):
         if self.basicinfo is None:
             raise ValueError('basicinfo is None')
         else:
-            return self.basicinfo.loc[symbol, SField.lot_size()]
+            return self.basicinfo.loc[symbol, SField.lot_size.name]
 
     def get_latest_bars(self, symbol: str, n: int, include_last: bool = False) -> pd.DataFrame:
         if symbol in self.hist_kline:
