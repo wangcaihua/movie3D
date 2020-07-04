@@ -8,9 +8,16 @@ from queue import Queue
 from quant.core.event import *
 from quant.core.strategy import Strategy
 from quant.core.datahandler import DataHandler
+from quant.data.sqlitedatahandler import SQLiteDataHandler
 from quant.core.riskmanager import RiskManager
 from quant.core.execution import ExecutionHandler
 from quant.core.portfolio import Portfolio
+
+from typing import cast
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Backtest(object):
@@ -19,7 +26,7 @@ class Backtest(object):
     an event-driven backtest.
     """
 
-    def __init__(self, events: Queue, heartbeat: int,
+    def __init__(self, events: Queue, heartbeat: float,
                  data_handler: DataHandler,
                  strategy: Strategy,
                  risk_mgr: RiskManager,
@@ -36,9 +43,9 @@ class Backtest(object):
         strategy - Generates signals based on market data.
         """
 
-        self.heartbeat: int = heartbeat
+        self.heartbeat: float = heartbeat
         self.events: Queue = events
-        self.data_handler: DataHandler = data_handler
+        self.data_handler: SQLiteDataHandler = cast(SQLiteDataHandler, data_handler)
         self.strategy: Strategy = strategy
         self.risk_mgr = risk_mgr
         self.portfolio: Portfolio = portfolio
@@ -55,6 +62,7 @@ class Backtest(object):
         """
         while True:
             if self.data_handler.continue_backtest:
+                logger.info('{datetime}-update_timeindex'.format(datetime=self.data_handler.cur_datetime))
                 self.portfolio.update_timeindex(self.data_handler.cur_datetime)
                 self.data_handler.update_bars()
             else:
@@ -91,12 +99,11 @@ class Backtest(object):
         """
         equity_curve = self.portfolio.calc_equity_curve()
 
-        print("Creating summary stats...")
+        logger.info("Creating summary stats...")
         stats = self.portfolio.calc_metric(equity_curve)
 
-        print("Creating equity curve...")
+        logger.info("Creating equity curve...")
         print(equity_curve.tail(10))
-
         print("Signals: %s" % self.signals)
         print("Orders: %s" % self.orders)
         print("Fills: %s" % self.fills)

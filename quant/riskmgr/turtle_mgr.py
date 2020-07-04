@@ -6,6 +6,10 @@ from quant.data.sqlitedatahandler import SQLiteDataHandler
 
 from typing import cast
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class TurtleMgr(RiskManager):
     def __init__(self, portfolio: Portfolio):

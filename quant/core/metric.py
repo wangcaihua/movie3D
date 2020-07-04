@@ -4,6 +4,10 @@
 import numpy as np
 import pandas as pd
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['calc_alpha_beta', 'calc_sharpe_ratio', 'calc_sortino_ratio', 'calc_drawdowns']
 
 

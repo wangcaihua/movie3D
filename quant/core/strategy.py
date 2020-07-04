@@ -3,12 +3,16 @@
 
 
 import queue
-from typing import List, Optional
+from typing import List, Generator, Optional
 from abc import ABCMeta, abstractmethod
 
 from quant.core.datahandler import DataHandler
 from quant.core.portfolio import Portfolio
 from quant.core.event import DataEvent, Signal, SignalEvent
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyRule(object, metaclass=ABCMeta):
@@ -23,7 +27,7 @@ class StrategyRule(object, metaclass=ABCMeta):
         raise NotImplementedError("Should implement rule_id")
 
     @abstractmethod
-    def handle(self, event: DataEvent) -> Optional[Signal]:
+    def handle(self, event: DataEvent) -> Generator[Signal, None, None]:
         raise NotImplementedError("Should implement handle(event: DataEvent)")
 
 
@@ -54,12 +58,12 @@ class Strategy(object, metaclass=ABCMeta):
     def on_data(self, event: DataEvent):
         signals = {}
         for rule in self.rules:
-            signal = rule.handle(event)
-            if signal is not None:
-                if signal.symbol in signals:
-                    signals[signal.symbol].append(signal)
-                else:
-                    signals[signal.symbol] = [signal]
+            for signal in rule.handle(event):
+                if signal is not None:
+                    if signal.symbol in signals:
+                        signals[signal.symbol].append(signal)
+                    else:
+                        signals[signal.symbol] = [signal]
 
         deduplicated_signals = []
         if signals:

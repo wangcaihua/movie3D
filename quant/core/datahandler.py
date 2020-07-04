@@ -29,29 +29,22 @@ class DataHandler(object, metaclass=ABCMeta):
         self.start_date = start_date
         self.symbol_list = symbol_list
         self.snapshot: Optional[pd.DataFrame] = None
-        self.hist_snapshots = []
 
         self.tfmt = '%Y-%m-%d'
         self.cur_datetime: str = start_date
         self.continue_backtest: bool = True
 
     @abstractmethod
-    def get_mkt_snapshot(self):
+    def update_snapshot(self):
         """
         Returns the snapshot for the market
         """
         raise NotImplementedError("Should implement get_mkt_snapshot()")
 
-    def get_latest_bar(self, symbol) -> pd.Series:
+    def get_curr_bar(self, symbol) -> pd.Series:
         return self.snapshot.loc[symbol]
 
-    def get_latest_datetime(self):
-        """
-        Returns a Python datetime object for the last bar.
-        """
-        return self.cur_datetime
-
-    def get_latest_bar_value(self, symbol, field: KField):
+    def get_curr_bar_value(self, symbol, field: KField):
         """
         Returns one of the Open, High, Low, Close, Volume or OI
         from the last bar.
@@ -59,14 +52,14 @@ class DataHandler(object, metaclass=ABCMeta):
         return self.snapshot.loc[symbol, field.name]
 
     @abstractmethod
-    def get_latest_bars(self, symbol: str, n: int, include_last: bool) -> pd.DataFrame:
+    def get_hist_bars(self, symbol: str, n: int) -> pd.DataFrame:
         """
         Returns the last N bars updated.
         """
         raise NotImplementedError("Should implement get_latest_bars()")
 
     @abstractmethod
-    def get_latest_bars_values(self, symbol: str, val_type: KField, n: int, include_last: bool) -> pd.Series:
+    def get_hist_bars_values(self, symbol: str, val_type: KField, n: int) -> pd.Series:
         """
         Returns the last N bar values from the 
         latest_symbol list, or N-k if less available.

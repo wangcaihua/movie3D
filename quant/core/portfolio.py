@@ -12,6 +12,10 @@ from quant.core.datahandler import KField, DataHandler
 
 from typing import Optional, List, Dict
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class Holdings(object):
     def __init__(self, datahandler: DataHandler, fill_events: Dict[str, List[FillEvent]],
@@ -55,7 +59,7 @@ class Holdings(object):
         if len(self.holding) == 0:
             total_value = self.cash
             for symbol in self.position:
-                curr_mkt_value = self.position[symbol] * self.datahandler.get_latest_bar_value(symbol, KField.close)
+                curr_mkt_value = self.position[symbol] * self.datahandler.get_curr_bar_value(symbol, KField.close)
                 total_value += curr_mkt_value + self.deposit[symbol]
                 total_value += self.finance[symbol] + self.dummy_cash[symbol]
             return total_value
@@ -87,7 +91,7 @@ class Holdings(object):
         return interest
 
     def is_affordable(self, symbol: str, pos: int) -> bool:
-        net_value = self.datahandler.get_latest_bar_value(symbol, KField.close) * pos
+        net_value = self.datahandler.get_curr_bar_value(symbol, KField.close) * pos
         est_commission = net_value * 0.01
         return self.cash > net_value * self.ratio + est_commission
 
@@ -115,7 +119,7 @@ class Holdings(object):
         elif fill.direction == FillEvent.SELL and self.position[fill.symbol] > 0:
             # close long, lighten is not allowed
             if abs(self.position[fill.symbol]) != fill.quantity:
-                print("lighten is not allowed")
+                logger.warning("lighten is not allowed")
                 return
 
             self.position[fill.symbol] -= fill.quantity
@@ -144,7 +148,7 @@ class Holdings(object):
         elif fill.direction == FillEvent.BUY and self.position[fill.symbol] < 0:
             # close short, lighten is not allowed
             if abs(self.position[fill.symbol]) != fill.quantity:
-                print("lighten is not allowed")
+                logger.warning("lighten is not allowed")
                 return
 
             self.position[fill.symbol] += fill.quantity
@@ -236,7 +240,7 @@ class Holdings(object):
     def mk_snapshot(self, cur_datetime: str):
         self.datetime = cur_datetime
         for symbol in self.position:
-            curr_mkt_value = self.position[symbol] * self.datahandler.get_latest_bar_value(symbol, KField.close)
+            curr_mkt_value = self.position[symbol] * self.datahandler.get_curr_bar_value(symbol, KField.close)
             self.holding[symbol] = curr_mkt_value + self.deposit[symbol]
             self.holding[symbol] += self.finance[symbol] + self.dummy_cash[symbol]
 
@@ -295,7 +299,7 @@ class Portfolio(object):
         self.current_holdings: Holdings = Holdings(self.data_handler, self.fill_events, initial_capital,
                                                    ratio, interest_rate)
 
-    def update_timeindex(self, cur_datetime):
+    def update_timeindex(self, curr_datetime):
         """
         Adds a new record to the positions matrix for the current 
         market data bar. This reflects the PREVIOUS bar, i.e. all
@@ -306,7 +310,7 @@ class Portfolio(object):
 
         # Update positions
         # ================
-        self.current_holdings.mk_snapshot(cur_datetime)
+        self.current_holdings.mk_snapshot(curr_datetime)
         self.all_holdings.append(self.current_holdings)
         self.current_holdings = self.current_holdings.copy_and_create()
 

@@ -1,10 +1,15 @@
+import numpy as np
 from quant.core.datahandler import KField
 from quant.core.event import *
 from quant.core.strategy import StrategyRule
 from quant.core.portfolio import Portfolio
 from quant.data.sqlitedatahandler import SQLiteDataHandler
 
-from typing import Optional, cast
+from typing import Optional, Generator, cast
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TurtleStrategy(StrategyRule):
@@ -33,7 +38,7 @@ class TurtleStrategy(StrategyRule):
         self.short_window = short_window
         self.long_window = long_window
 
-    def handle(self, event: DataEvent) -> Optional[Signal]:
+    def handle(self, event: DataEvent) -> Generator[Signal, None, None]:
         """
         Generates a new set of signals based on the MAC
         SMA with the short window crossing the long window
@@ -46,85 +51,91 @@ class TurtleStrategy(StrategyRule):
         assert isinstance(event, DataEvent)
         for symbol in self.symbol_list:
             if symbol in self.data_handler.plate_symbols or symbol == self.data_handler.benchmark:
-                return
+                continue
+            try:
+                current_atr: float = self.data_handler.get_curr_bar_value(symbol, KField.atr)
+                current_price: float = self.data_handler.get_curr_bar_value(symbol, KField.close)
 
-            current_atr: float = self.data_handler.get_latest_bar_value(symbol, KField.atr)
-            current_price: float = self.data_handler.get_latest_bar_value(symbol, KField.close)
+                highest10: float = np.max(self.data_handler.get_hist_bars_values(symbol, KField.close, 10))
+                lowest10: float = np.min(self.data_handler.get_hist_bars_values(symbol, KField.close, 10))
+                highest20: float = np.max(self.data_handler.get_hist_bars_values(symbol, KField.close, 20))
+                lowest20: float = np.min(self.data_handler.get_hist_bars_values(symbol, KField.close, 20))
 
-            highest10: float = self.data_handler.get_latest_bars_values(symbol, KField.high, 10).max()
-            lowest10: float = self.data_handler.get_latest_bars_values(symbol, KField.low, 10).min()
-            highest20: float = self.data_handler.get_latest_bars_values(symbol, KField.high, 20).max()
-            lowest20: float = self.data_handler.get_latest_bars_values(symbol, KField.low, 20).min()
+                if self.portfolio.has_position(symbol):  # extend/lighten/close
+                    fist_fill = self.portfolio.get_first_fill_event(symbol)
+                    last_fill = self.portfolio.get_last_fill_event(symbol)
+                    hist_fill_events_len = self.portfolio.get_fill_events_len(symbol)
+                    if hist_fill_events_len > 4:
+                        continue
 
-            if self.portfolio.has_position(symbol):  # extend/lighten/close
-                fist_fill = self.portfolio.get_first_fill_event(symbol)
-                last_fill = self.portfolio.get_last_fill_event(symbol)
-                hist_fill_events_len = self.portfolio.get_fill_events_len(symbol)
-                if hist_fill_events_len > 4:
-                    return None
-
-                if fist_fill.direction == FillEvent.BUY:
-                    if 0.5 * fist_fill.attr['atr'] + last_fill.fill_price <= current_price:
-                        return Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
-                            "index": self.data_handler.hist_index,
-                            "atr": current_atr,
-                            "rule_id": self.rule_id
-                        })
-                    else:
-                        hold_days = self.data_handler.hist_index - fist_fill.attr['index']
-                        hold_max = self.data_handler.get_latest_bars_values(symbol, KField.high, hold_days).max()
-
-                        if hold_max - 2 * fist_fill.attr['atr'] > current_price:
-                            return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
-                                "index": self.data_handler.hist_index,
-                                "atr": current_atr,
-                                "rule_id": self.rule_id
-                            })
-                        elif lowest10 > current_price:
-                            return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                    if fist_fill.direction == FillEvent.BUY:
+                        if 0.5 * fist_fill.attr['atr'] + last_fill.fill_price <= current_price:
+                            yield Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
                                 "rule_id": self.rule_id
                             })
                         else:
-                            return None
-                else:  # SELL
-                    if last_fill.fill_price - 0.5 * fist_fill.attr['atr'] >= current_price:
-                        return Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
-                            "index": self.data_handler.hist_index,
-                            "atr": current_atr,
-                            "rule_id": self.rule_id
-                        })
-                    else:
-                        hold_days = self.data_handler.hist_index - fist_fill.attr['index']
-                        hold_min = self.data_handler.get_latest_bars_values(symbol, KField.low, hold_days).min()
+                            hold_days = self.data_handler.hist_index - fist_fill.attr['index']
+                            hold_max = self.data_handler.get_hist_bars_values(symbol, KField.high, hold_days).max()
 
-                        if hold_min + 2 * fist_fill.attr['atr'] < current_price:
-                            return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
-                                "index": self.data_handler.hist_index,
-                                "atr": current_atr,
-                                "rule_id": self.rule_id
-                            })
-                        elif highest10 < current_price:
-                            return Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                            if hold_max - 2 * fist_fill.attr['atr'] > current_price:
+                                yield Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                                    "index": self.data_handler.hist_index,
+                                    "atr": current_atr,
+                                    "rule_id": self.rule_id
+                                })
+                            elif lowest10 > current_price:
+                                yield Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                                    "index": self.data_handler.hist_index,
+                                    "atr": current_atr,
+                                    "rule_id": self.rule_id
+                                })
+                            else:
+                                yield None
+                    else:  # SELL
+                        if last_fill.fill_price - 0.5 * fist_fill.attr['atr'] >= current_price:
+                            yield Signal(symbol=symbol, signal_type=Signal.Extend, confidence=1.0, attr={
                                 "index": self.data_handler.hist_index,
                                 "atr": current_atr,
                                 "rule_id": self.rule_id
                             })
                         else:
-                            return None
-            else:  # open long/short
-                if current_price > highest20:
-                    return Signal(symbol=symbol, signal_type=Signal.OpenLong, confidence=1.0, attr={
-                        "index": self.data_handler.hist_index,
-                        "atr": current_atr,
-                        "rule_id": self.rule_id
-                    })
-                elif current_price < lowest20:
-                    return Signal(symbol=symbol, signal_type=Signal.OpenShort, confidence=1.0, attr={
-                        "index": self.data_handler.hist_index,
-                        "atr": current_atr,
-                        "rule_id": self.rule_id
-                    })
-                else:
-                    return None
+                            hold_days = self.data_handler.hist_index - fist_fill.attr['index']
+                            hold_min = self.data_handler.get_hist_bars_values(symbol, KField.low, hold_days).min()
+
+                            if hold_min + 2 * fist_fill.attr['atr'] < current_price:
+                                yield Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                                    "index": self.data_handler.hist_index,
+                                    "atr": current_atr,
+                                    "rule_id": self.rule_id
+                                })
+                            elif highest10 < current_price:
+                                yield Signal(symbol=symbol, signal_type=Signal.Close, confidence=1.0, attr={
+                                    "index": self.data_handler.hist_index,
+                                    "atr": current_atr,
+                                    "rule_id": self.rule_id
+                                })
+                            else:
+                                yield None
+                else:  # open long/short
+                    if current_price > highest20:
+                        yield Signal(symbol=symbol, signal_type=Signal.OpenLong, confidence=1.0, attr={
+                            "index": self.data_handler.hist_index,
+                            "atr": current_atr,
+                            "rule_id": self.rule_id
+                        })
+                    elif current_price < lowest20:
+                        yield Signal(symbol=symbol, signal_type=Signal.OpenShort, confidence=1.0, attr={
+                            "index": self.data_handler.hist_index,
+                            "atr": current_atr,
+                            "rule_id": self.rule_id
+                        })
+                    else:
+                        yield None
+            except KeyError as e:
+                logger.info('cannot find data for ' + str(e) + ' in ' + self.data_handler.cur_datetime)
+                continue
+            except Exception as e:
+                logger.info(str(e))
+                continue

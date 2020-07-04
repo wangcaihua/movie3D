@@ -8,6 +8,10 @@ from quant.core.datahandler import DataHandler
 from quant.core.event import OrderEvent
 from quant.core.portfolio import Portfolio
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ExecutionHandler(object, metaclass=ABCMeta):
     """

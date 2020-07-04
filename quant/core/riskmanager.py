@@ -13,6 +13,10 @@ from quant.core.portfolio import Portfolio
 from quant.core.datahandler import DataHandler
 from quant.core.event import SignalEvent, OrderEvent
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class RiskManager(object, metaclass=ABCMeta):
     def __init__(self, portfolio: Portfolio):
@@ -32,4 +36,3 @@ class RiskManager(object, metaclass=ABCMeta):
         event - The tuple containing Signal information.
         """
         raise NotImplementedError("Should implement on_signal(event: SignalEvent)")
-

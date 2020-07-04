@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 from queue import Queue
 from quant.data.sqlitedatahandler import SQLiteDataHandler
@@ -7,6 +8,10 @@ from quant.strategy.turtle_strategy import TurtleStrategy
 from quant.riskmgr.turtle_mgr import TurtleMgr
 from quant.executor.echoexecutor import EchoExecutionHandler
 from quant.backtest import Backtest
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s:%(funcName)s:%(lineno)d - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 plate_stocks = ['HK.BK1093',
                 'HK.01113',
@@ -309,13 +314,14 @@ start_date = '2020-01-01'
 sdh = SQLiteDataHandler(plate_stocks, events, start_date)
 # sdh.update_local_kline_db()
 sdh.load_kline_from_local_db()
-sdh.init_hist_time_line()
+sdh.init_time_line()
 sdh.load_basicinfo_from_local_db()
+try:
+    sdh.update_snapshot()
+except Exception as e:
+    logger.info('update_snapshot Exception:' + str(e))
 
 read = set(sdh.get_local_symbols())
-print(len(read), len(plate_stocks), read - set(plate_stocks))
-print(sdh.cur_datetime, sdh.hist_index, sdh.hist_time_line[sdh.hist_index])
-print()
 
 # 3) create portofino
 portofino = Portfolio(data_handler=sdh, events=events, start_date=start_date)
@@ -332,8 +338,7 @@ risk_mgr = TurtleMgr(portfolio=portofino)
 execute = EchoExecutionHandler(portofino)
 
 # 7) create backtest
-backtest = Backtest(events, 1, sdh, strategy, risk_mgr, execute, portofino)
-
+backtest = Backtest(events, 0.1, sdh, strategy, risk_mgr, execute, portofino)
 
 backtest.simulate_trading()
 

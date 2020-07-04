@@ -10,6 +10,10 @@ from quant.core.event import OrderEvent, FillEvent
 from quant.core.portfolio import Portfolio
 from quant.data.sqlitedatahandler import SQLiteDataHandler
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class EchoExecutionHandler(ExecutionHandler):
     """

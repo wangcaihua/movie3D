@@ -4,6 +4,10 @@
 from datetime import datetime
 from typing import Dict, List, Union
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 __all__ = ['DataEvent', 'MarketEvent', 'Signal', 'SignalEvent', 'OrderEvent', 'FillEvent']
 
 

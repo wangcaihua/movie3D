@@ -5,12 +5,17 @@ import talib
 from futu import *
 from queue import Queue
 import pandas as pd
+import logging
 from datetime import datetime, timedelta
 
 from quant.core.event import DataEvent
 from quant.core.datahandler import DataHandler, SField, KField
 
 from typing import Optional, Set
+
+from quant.core.exceptions import *
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteDataHandler(DataHandler):
@@ -21,16 +26,16 @@ class SQLiteDataHandler(DataHandler):
         self.hist_kline_start: str = hist_kline_start
         self.hist_kline: dict = {}
         self.hist_index: int = -1
-        self.hist_time_line: list = []
+        self.time_line: list = []
         self.run_type: str = run_type
         self.basicinfo: Optional[pd.DataFrame] = None
 
         # data base and futu initial
-        print("start sqlite ...")
+        logger.info("start sqlite ...")
         self.conn: sqlite3.Connection = sqlite3.connect(sqllite_db)
         self.cursor: sqlite3.Cursor = self.conn.cursor()
 
-        print("start futu ...")
+        logger.info("start futu ...")
         self.ktype = SubType.K_DAY
         self.autype = AuType.QFQ
         self.quote_ctx: OpenQuoteContext = OpenQuoteContext(host=futu_host, port=futu_port)
@@ -48,53 +53,59 @@ class SQLiteDataHandler(DataHandler):
                                               temp[KField.close.name], timeperiod=20)
             self.hist_kline[self.benchmark] = temp
 
-        self._short_set: Optional[Set[str]] = None
+        # init short_set
+        ret, data = self.quote_ctx.get_plate_stock(plate_code='HK.BK1000')
+        assert ret == RET_OK
+        self._short_set = set(data.code.to_list())
 
         ret, plate_list = self.quote_ctx.get_plate_list(Market.HK, Plate.ALL)
         assert ret == RET_OK
         self.plate_symbols: Set[str] = set(plate_list.code.to_list())
 
     def close(self):
-        print("close sqlite ...")
+        logger.info('close sqllit connection ...')
         self.conn.close()
-        print("close futu ...")
+        logger.info("close futu ...")
         self.quote_ctx.close()
 
     def can_short(self, symbol) -> bool:
-        if self._short_set is None:
-            ret, data = self.quote_ctx.get_plate_stock(plate_code='HK.BK1000')
-            assert ret == RET_OK
-            self._short_set = set(data.code.to_list())
         return symbol in self._short_set
 
-    def init_hist_time_line(self):
-        if len(self.hist_time_line) == 0:
-            self.hist_time_line = self.hist_kline[self.benchmark].index.values.tolist()
+    def init_time_line(self):
+        if len(self.time_line) == 0:
+            self.time_line = self.hist_kline[self.benchmark].index.values.tolist()
 
         delta = timedelta(days=1)
-        while self.cur_datetime not in self.hist_time_line:
+        while self.cur_datetime not in self.time_line:
             cur_datetime = datetime.strptime(self.cur_datetime, self.tfmt)
             self.cur_datetime = (cur_datetime + delta).strftime(self.tfmt)
 
-        self.hist_index = self.hist_time_line.index(self.cur_datetime) - 1
-        self.cur_datetime = self.hist_time_line[self.hist_index]
+        # 上一个交易日对应的索引
+        self.hist_index = self.time_line.index(self.cur_datetime) - 1
+        # 当前交易日
+        self.cur_datetime = self.time_line[self.hist_index + 1]
 
-    def get_mkt_snapshot(self):
+    def update_snapshot(self):
         if self.run_type == "back_test":
             snapshot = []
             # update hist_index/cur_datetime
             for symbol in self.symbol_list:
                 try:
-                    snapshot.append(self.hist_kline[symbol].loc[self.cur_datetime])
+                    if symbol in self.hist_kline:
+                        snapshot.append(self.hist_kline[symbol].loc[self.cur_datetime])
+                    else:
+                        raise SYMBOLNOTFOUND('symbol')
+                except SYMBOLNOTFOUND as e:
+                    raise e
                 except Exception as e:
-                    print(symbol + " maybe closed at " + self.cur_datetime + " : ")
+                    logger.info('cannot found date ' + str(e) + " for symbol " + symbol + ", maybe closed that day")
 
             if snapshot:
                 snapshot = pd.DataFrame(snapshot)
                 snapshot.set_index("code", inplace=True)
                 self.snapshot = snapshot
             else:
-                print("error when create snapshot, use last snapshot !")
+                raise CREATESNAPSHOTERROR(self.cur_datetime)
         else:
             ret, snapshot = self.quote_ctx.get_market_snapshot(self.symbol_list)
             snapshot.set_index("code", inplace=True)
@@ -103,8 +114,6 @@ class SQLiteDataHandler(DataHandler):
 
             # update cur_datetime
             self.cur_datetime = self.snapshot.update_time.max()[0:10]
-
-        return self.snapshot
 
     def snapshot_extend(self):
         all_symbols, batch_size = self.basicinfo.index.values.tolist(), 400
@@ -164,17 +173,17 @@ class SQLiteDataHandler(DataHandler):
                     if ret == RET_OK:
                         data_splits.append(data)
                     else:
-                        print('error:', data)
+                        logger.info('request_history_kline error!')
                         retry += 1
 
                 if len(data_splits) > 0:
                     data_splits = pd.concat(data_splits, axis=0, join='outer', ignore_index=True)
-                print(symbol + " download kline finished!")
+                logger.info(symbol + " download kline finished!")
             except Exception as e:
-                print(e)
+                logger.info(symbol + " download Exception: " + str(e) + ", retry ...")
                 retry += 1
         else:
-            print(symbol + " download kline form futu fail!")
+            logger.warning(symbol + " download kline form futu fail!")
 
         if isinstance(data_splits, pd.DataFrame):
             data_splits["time_key"] = data_splits.time_key.str[0:10]
@@ -240,7 +249,7 @@ class SQLiteDataHandler(DataHandler):
             time.sleep(0.5)
 
         if fail_symbols:
-            print(fail_symbols)
+            logger.warning('fail_symbols: ' + ','.join(fail_symbols))
 
     def build_local_basicinfo_db(self):
         # get_plate_list
@@ -265,7 +274,7 @@ class SQLiteDataHandler(DataHandler):
                 plate_stock['plate_code'] = plate
                 plate_stock['plate_name'] = plate_name
                 plate_stocks.append(plate_stock)
-                print(plate, plate_name, 'done!')
+                logger.info(plate + ", " + plate_name, ' done!')
 
             time.sleep(3)
 
@@ -297,37 +306,36 @@ class SQLiteDataHandler(DataHandler):
         else:
             return self.basicinfo.loc[symbol, SField.lot_size.name]
 
-    def get_latest_bars(self, symbol: str, n: int, include_last: bool = False) -> pd.DataFrame:
+    def get_hist_bars(self, symbol: str, n: int) -> pd.DataFrame:
         if symbol in self.hist_kline:
-            if include_last:
-                return self.hist_kline[symbol].iloc[(self.hist_index - n + 1):(self.hist_index + 1)]
-            else:
-                return self.hist_kline[symbol].iloc[(self.hist_index - n):self.hist_index]
+            start = self.time_line[self.hist_index - n + 1]
+            end = self.cur_datetime
+            return self.hist_kline[symbol].loc[start:end]
         else:
-            if include_last:
-                ret, kline = self.quote_ctx.get_cur_kline(symbol, n, ktype=self.ktype, autype=self.autype)
-                assert ret == RET_OK
-                kline.set_index('time_key', inplace=True)
-                return kline
-            else:
-                ret, kline = self.quote_ctx.get_cur_kline(symbol, n + 1, ktype=self.ktype, autype=self.autype)
-                assert ret == RET_OK
-                kline.set_index('time_key', inplace=True)
-                return kline.iloc[0:-1]
+            ret, kline = self.quote_ctx.get_cur_kline(symbol, n + 1, ktype=self.ktype, autype=self.autype)
+            assert ret == RET_OK
+            kline.set_index('time_key', inplace=True)
+            return kline.iloc[0:-1]
 
-    def get_latest_bars_values(self, symbol: str, val_type: KField, n: int, include_last: bool = False) -> pd.Series:
-        return self.get_latest_bars(symbol, n, include_last)[val_type.name]
+    def get_hist_bars_values(self, symbol: str, val_type: KField, n: int) -> pd.Series:
+        return self.get_hist_bars(symbol, n)[val_type.name]
 
     def update_bars(self):
         if self.run_type == 'back_test':
             self.hist_index += 1
-            assert self.hist_index < len(self.hist_time_line)
-            self.cur_datetime = self.hist_time_line[self.hist_index]
-            self.get_mkt_snapshot()
+            assert self.hist_index < len(self.time_line)
+            self.cur_datetime = self.time_line[self.hist_index + 1]
+            try:
+                self.update_snapshot()
+            except Exception as e:
+                raise e
 
-            if len(self.hist_time_line) <= self.hist_index + 1:
+            if len(self.time_line) <= self.hist_index + 2:
                 self.continue_backtest = False
         else:
-            self.get_mkt_snapshot()
+            try:
+                self.update_snapshot()
+            except Exception as e:
+                raise e
 
         self.events.put(DataEvent(self.cur_datetime))
