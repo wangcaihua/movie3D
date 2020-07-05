@@ -158,7 +158,7 @@ class FillEvent(Event):
     directions = {BUY: 0, SELL: 1}
 
     def __init__(self, timestamp: datetime, symbol: str, exchange: float, quantity: int,
-                 direction: str, fill_cost: float, attr: dict = None, commission: float = None):
+                 direction: str, fill_price: float, attr: dict = None, commission: float = None):
         """
         Initialises the FillEvent object. Sets the symbol, exchange,
         quantity, direction, cost of fill and an optional
@@ -174,7 +174,7 @@ class FillEvent(Event):
         exchange - The exchange where the order was filled.
         quantity - The filled quantity.
         direction - The direction of fill ('BUY' or 'SELL')
-        fill_cost - The holdings value in dollars.
+        fill_price - The holdings value in dollars.
         commission - An optional commission sent from IB.
         """
         self.timestamp: datetime = timestamp
@@ -182,7 +182,7 @@ class FillEvent(Event):
         self.exchange: float = exchange
         self.quantity: int = quantity
         self.direction: str = direction
-        self.fill_price: float = fill_cost
+        self.fill_price: float = fill_price
         self.attr = attr
 
         # Calculate commission
@@ -201,9 +201,9 @@ class FillEvent(Event):
         Based on "US API Directed Orders":
         https://www.interactivebrokers.com/en/index.php?f=commission&p=stocks2
         """
-        full_cost = 1.3
-        if self.quantity <= 500:
-            full_cost = max(1.3, 0.013 * self.quantity)
+        net_value = abs(self.quantity * self.fill_price)
+        if net_value <= 500:
+            full_cost = max(1.3, 0.013 * net_value)
         else:  # Greater than 500
-            full_cost = max(1.3, 0.008 * self.quantity)
+            full_cost = max(1.3, 0.008 * net_value)
         return full_cost

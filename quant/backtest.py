@@ -99,14 +99,15 @@ class Backtest(object):
         """
         equity_curve = self.portfolio.calc_equity_curve()
 
-        logger.info("Creating summary stats...")
-        stats = self.portfolio.calc_metric(equity_curve)
-
         logger.info("Creating equity curve...")
-        print(equity_curve.tail(10))
         print("Signals: %s" % self.signals)
         print("Orders: %s" % self.orders)
         print("Fills: %s" % self.fills)
+        print()
+
+        logger.info("Creating summary stats...")
+        stats = self.portfolio.calc_metric(equity_curve)
+        print('\n'.join(stats))
 
     def simulate_trading(self):
         """

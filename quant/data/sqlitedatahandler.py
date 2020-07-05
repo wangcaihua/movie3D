@@ -2,6 +2,7 @@ import sqlite3
 import datetime
 
 import talib
+import math
 from futu import *
 from queue import Queue
 import pandas as pd
@@ -12,8 +13,6 @@ from quant.core.event import DataEvent
 from quant.core.datahandler import DataHandler, SField, KField
 
 from typing import Optional, Set
-
-from quant.core.exceptions import *
 
 logger = logging.getLogger(__name__)
 
@@ -92,20 +91,19 @@ class SQLiteDataHandler(DataHandler):
             for symbol in self.symbol_list:
                 try:
                     if symbol in self.hist_kline:
-                        snapshot.append(self.hist_kline[symbol].loc[self.cur_datetime])
-                    else:
-                        raise SYMBOLNOTFOUND('symbol')
-                except SYMBOLNOTFOUND as e:
-                    raise e
-                except Exception as e:
-                    logger.info('cannot found date ' + str(e) + " for symbol " + symbol + ", maybe closed that day")
+                        if self.cur_datetime >= self.hist_kline[symbol].index[0]:
+                            snapshot.append(self.hist_kline[symbol].loc[self.cur_datetime])
+                        else:
+                            raise ValueError('the stock ' + symbol + ' has not been IPO yet in ' + self.cur_datetime)
+                except ValueError as e:
+                    logger.info(str(e))
+                except KeyError as e:
+                    logger.info('cannot found data in' + str(e) + " for symbol " + symbol + ", maybe closed that day")
 
             if snapshot:
                 snapshot = pd.DataFrame(snapshot)
                 snapshot.set_index("code", inplace=True)
                 self.snapshot = snapshot
-            else:
-                raise CREATESNAPSHOTERROR(self.cur_datetime)
         else:
             ret, snapshot = self.quote_ctx.get_market_snapshot(self.symbol_list)
             snapshot.set_index("code", inplace=True)
@@ -304,12 +302,56 @@ class SQLiteDataHandler(DataHandler):
         if self.basicinfo is None:
             raise ValueError('basicinfo is None')
         else:
-            return self.basicinfo.loc[symbol, SField.lot_size.name]
+            try:
+                return self.basicinfo.loc[symbol, SField.lot_size.name]
+            except KeyError as e:
+                logger.info('cannot found ' + str(e) + ' in basicinfo')
+                ret, basicinfo = self.quote_ctx.get_stock_basicinfo(Market.HK, SecurityType.STOCK, [symbol])
+                assert ret == RET_OK
+                basicinfo.set_index('code', inplace=True)
+                lot_size = basicinfo.loc[symbol, SField.lot_size.name]
+
+                if lot_size is None or math.isnan(lot_size):
+                    raise ValueError('cannot get lot_size from futu for ' + symbol + ' in ' + self.cur_datetime)
+                else:
+                    return lot_size
+
+    def get_curr_bar_value(self, symbol, field: KField, rool_back=False):
+        """
+        Returns one of the Open, High, Low, Close, Volume or OI
+        from the last bar.
+        """
+        try:
+            value = self.snapshot.loc[symbol, field.name]
+            if math.isnan(value) or value is None:
+                raise ValueError("the value of " + symbol + ":" + field.name + " is NaN/None")
+            else:
+                return value
+        except KeyError as e:
+            if rool_back:
+                if symbol in self.hist_kline:
+                    hist_kline = self.hist_kline[symbol]
+                    dates = hist_kline.index
+                    if self.cur_datetime < dates[0]:
+                        raise ValueError("the stock " + symbol + ' has not been IPO yet in ' + self.cur_datetime)
+
+                    last_date = self.time_line[self.hist_index]
+                    detla = timedelta(days=1)
+                    while last_date not in dates:
+                        last_date = datetime.strptime(last_date, self.tfmt) - detla
+                        last_date = last_date.strftime(self.tfmt)
+
+                    if last_date in dates:
+                        value = self.hist_kline[symbol].loc[last_date, field.name]
+                        if math.isnan(value) or value is None:
+                            raise ValueError("the value of " + symbol + ":" + field.name + " is NaN/None")
+                        else:
+                            return value
+            raise e
 
     def get_hist_bars(self, symbol: str, n: int) -> pd.DataFrame:
         if symbol in self.hist_kline:
-            start = self.time_line[self.hist_index - n + 1]
-            end = self.cur_datetime
+            start, end = self.time_line[self.hist_index - n + 1], self.time_line[self.hist_index]
             return self.hist_kline[symbol].loc[start:end]
         else:
             ret, kline = self.quote_ctx.get_cur_kline(symbol, n + 1, ktype=self.ktype, autype=self.autype)

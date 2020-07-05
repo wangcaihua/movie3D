@@ -1,9 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
-
 import queue
-from typing import List, Generator, Optional
+from typing import List, Generator
 from abc import ABCMeta, abstractmethod
 
 from quant.core.datahandler import DataHandler

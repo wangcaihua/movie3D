@@ -1,7 +1,5 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
-import datetime
 from typing import cast
 
 from quant.core.datahandler import KField
@@ -47,9 +45,8 @@ class EchoExecutionHandler(ExecutionHandler):
         """
 
         symbol = event.symbol
-        fill_cost = self.data_handler.get_latest_bar_value(symbol, KField.close)
-        direction = 1 if event.direction == OrderEvent.BUY else -1
-        fill_event = FillEvent(event.timestamp, symbol, exchange=1.0, quantity=direction * event.quantity,
-                               direction=event.direction, fill_cost=fill_cost, attr=event.attr)
+        fill_price = self.data_handler.get_curr_bar_value(symbol, KField.close)
+        fill_event = FillEvent(event.timestamp, symbol, exchange=1.0, quantity=event.quantity,
+                               direction=event.direction, fill_price=fill_price, attr=event.attr)
 
         self.events.put(fill_event)

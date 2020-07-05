@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 from queue import Queue
+from matplotlib import pyplot as plt
 from quant.data.sqlitedatahandler import SQLiteDataHandler
 from quant.core.portfolio import Portfolio
 from quant.core.strategy import Strategy
@@ -9,7 +10,7 @@ from quant.riskmgr.turtle_mgr import TurtleMgr
 from quant.executor.echoexecutor import EchoExecutionHandler
 from quant.backtest import Backtest
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.WARN,
                     format='%(asctime)s - %(name)s:%(funcName)s:%(lineno)d - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,7 @@ except Exception as e:
 read = set(sdh.get_local_symbols())
 
 # 3) create portofino
-portofino = Portfolio(data_handler=sdh, events=events, start_date=start_date)
+portofino = Portfolio(data_handler=sdh, events=events, start_date=start_date, initial_capital=1000000)
 
 # 4) create strategy
 strategy = Strategy(portofino)
@@ -341,6 +342,11 @@ execute = EchoExecutionHandler(portofino)
 backtest = Backtest(events, 0.1, sdh, strategy, risk_mgr, execute, portofino)
 
 backtest.simulate_trading()
+
+equity_curve = backtest.portfolio.calc_equity_curve()
+
+plt.plot(equity_curve['total'].values)
+plt.show()
 
 sdh.close()
 print("finished backtest!")

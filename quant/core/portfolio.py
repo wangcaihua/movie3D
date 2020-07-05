@@ -59,16 +59,20 @@ class Holdings(object):
         if len(self.holding) == 0:
             total_value = self.cash
             for symbol in self.position:
-                curr_mkt_value = self.position[symbol] * self.datahandler.get_curr_bar_value(symbol, KField.close)
-                total_value += curr_mkt_value + self.deposit[symbol]
-                total_value += self.finance[symbol] + self.dummy_cash[symbol]
+                try:
+                    curr_close = self.datahandler.get_curr_bar_value(symbol, KField.close, True)
+                    curr_mkt_value = self.position[symbol] * curr_close
+                    total_value += curr_mkt_value + self.deposit[symbol]
+                    total_value += self.finance[symbol] + self.dummy_cash[symbol]
+                except KeyError as e:
+                    logger.error('cannot found ' + str(e) + ' in snaplshot ...')
             return total_value
         else:
             return sum(self.holding.values()) + self.cash
 
     def copy_and_create(self):
-        holdings = Holdings(self.datahandler, self.fill_events, self.ratio,
-                            self.cash, self.commission, self.interest_rate)
+        holdings = Holdings(self.datahandler, self.fill_events, self.cash,
+                            self.ratio, self.commission, self.interest_rate)
         holdings.position = deepcopy(self.position)
         holdings.deposit = deepcopy(self.deposit)
         holdings.finance = deepcopy(self.finance)
@@ -91,16 +95,16 @@ class Holdings(object):
         return interest
 
     def is_affordable(self, symbol: str, pos: int) -> bool:
-        net_value = self.datahandler.get_curr_bar_value(symbol, KField.close) * pos
-        est_commission = net_value * 0.01
+        net_value = abs(self.datahandler.get_curr_bar_value(symbol, KField.close) * pos)
+        est_commission = net_value * 0.0013
         return self.cash > net_value * self.ratio + est_commission
 
     def add(self, fill: FillEvent):
-        if fill.symbol not in self.position[fill.symbol]:
-            self.position[fill.symbol] = 0
-
-        if fill.direction == FillEvent.BUY and self.position[fill.symbol] > 0:
+        if fill.direction == FillEvent.BUY and fill.symbol in self.position and self.position[fill.symbol] > 0:
             # extend long
+            if not self.is_affordable(fill.symbol, fill.quantity):
+                return
+
             self.position[fill.symbol] += fill.quantity
             # 买股票所花
             stock_net_value = fill.quantity * fill.fill_price
@@ -116,7 +120,7 @@ class Holdings(object):
 
             # 计算dummy_cash
             self.dummy_cash[fill.symbol] -= this_deposit
-        elif fill.direction == FillEvent.SELL and self.position[fill.symbol] > 0:
+        elif fill.direction == FillEvent.SELL and fill.symbol in self.position and self.position[fill.symbol] > 0:
             # close long, lighten is not allowed
             if abs(self.position[fill.symbol]) != fill.quantity:
                 logger.warning("lighten is not allowed")
@@ -145,7 +149,7 @@ class Holdings(object):
 
             if self.position[fill.symbol] != 0:
                 raise Exception("lighten is not allowed")
-        elif fill.direction == FillEvent.BUY and self.position[fill.symbol] < 0:
+        elif fill.direction == FillEvent.BUY and fill.symbol in self.position and self.position[fill.symbol] < 0:
             # close short, lighten is not allowed
             if abs(self.position[fill.symbol]) != fill.quantity:
                 logger.warning("lighten is not allowed")
@@ -168,8 +172,11 @@ class Holdings(object):
             # 剩的放回现金库
             self.cash += self.dummy_cash[fill.symbol]
             self.dummy_cash[fill.symbol] = 0.0
-        elif fill.direction == FillEvent.SELL and self.position[fill.symbol] < 0:
+        elif fill.direction == FillEvent.SELL and fill.symbol in self.position and self.position[fill.symbol] < 0:
             # extend short
+            if not self.is_affordable(fill.symbol, fill.quantity):
+                return
+
             self.position[fill.symbol] -= fill.quantity
 
             stock_net_value = fill.quantity * fill.fill_price
@@ -185,9 +192,12 @@ class Holdings(object):
 
             # 计算dummy_cash
             self.dummy_cash[fill.symbol] += this_deposit + 2 * this_finance
-        elif fill.direction == FillEvent.BUY and self.position[fill.symbol] == 0:
+        elif fill.direction == FillEvent.BUY and fill.symbol not in self.position:
             # open long
-            self.position[fill.symbol] += fill.quantity
+            if not self.is_affordable(fill.symbol, fill.quantity):
+                return
+
+            self.position[fill.symbol] = fill.quantity
             # 买股票所花
             stock_net_value = fill.quantity * fill.fill_price
             this_deposit = stock_net_value * self.ratio  # 保证金额, 自动转为成本
@@ -202,9 +212,12 @@ class Holdings(object):
 
             # 计算dummy_cash
             self.dummy_cash[fill.symbol] = -this_deposit
-        else:
+        elif fill.direction == FillEvent.SELL and fill.symbol not in self.position:
             # open short
-            self.position[fill.symbol] -= fill.quantity
+            if not self.is_affordable(fill.symbol, fill.quantity):
+                return
+
+            self.position[fill.symbol] = -fill.quantity
 
             stock_net_value = fill.quantity * fill.fill_price
             this_deposit = stock_net_value * self.ratio  # 保证金, 自动转为成本
@@ -219,6 +232,17 @@ class Holdings(object):
 
             # 计算dummy_cash
             self.dummy_cash[fill.symbol] = this_deposit + 2 * this_finance
+        else:
+            print("...............")
+
+        if self.position[fill.symbol] > 0:
+            out = (fill.timestamp, "LONG", fill.symbol, fill.direction, fill.quantity,
+                   fill.quantity * fill.fill_price, fill.commission, fill.attr['reason'])
+            print(' - '.join([str(_) for _ in out]))
+        else:
+            out = (fill.timestamp, "SHORT", fill.symbol, fill.direction, fill.quantity,
+                   fill.quantity * fill.fill_price, fill.commission, fill.attr['reason'])
+            print(' - '.join([str(_) for _ in out]))
 
         # 交易佣金
         self.cash -= fill.commission
@@ -240,7 +264,7 @@ class Holdings(object):
     def mk_snapshot(self, cur_datetime: str):
         self.datetime = cur_datetime
         for symbol in self.position:
-            curr_mkt_value = self.position[symbol] * self.datahandler.get_curr_bar_value(symbol, KField.close)
+            curr_mkt_value = self.position[symbol] * self.datahandler.get_curr_bar_value(symbol, KField.close, True)
             self.holding[symbol] = curr_mkt_value + self.deposit[symbol]
             self.holding[symbol] += self.finance[symbol] + self.dummy_cash[symbol]
 
@@ -345,9 +369,10 @@ class Portfolio(object):
 
     def get_fill_event(self, symbol, index=0) -> Optional[FillEvent]:
         if symbol in self.fill_events:
-            if len(self.fill_events[symbol]) > 0 and abs(index) < len(self.fill_events[symbol]):
+            try:
                 return self.fill_events[symbol][index]
-            else:
+            except IndexError as e:
+                logger.info(str(e))
                 return None
         else:
             return None
@@ -394,10 +419,10 @@ class Portfolio(object):
         curve['drawdown'] = drawdown
 
         total_return = curve.equity_curve[-1]
-        stats = [("Total Return", "%0.2f%%" % ((total_return - 1.0) * 100.0)),
-                 ("Sharpe Ratio", "%0.2f" % sharpe_ratio),
-                 ("Max Drawdown", "%0.2f%%" % (max_dd * 100.0)),
-                 ("Drawdown Duration", "%d" % dd_duration)]
+        stats = [("Total Return: %0.2f%%" % ((total_return - 1.0) * 100.0)),
+                 ("Sharpe Ratio: %0.2f" % sharpe_ratio),
+                 ("Max Drawdown: %0.2f%%" % (max_dd * 100.0)),
+                 ("Drawdown Duration: %d" % dd_duration)]
 
         if filename is not None:
             curve.to_csv(filename)

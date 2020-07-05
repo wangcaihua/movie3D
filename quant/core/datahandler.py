@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import pandas as pd
+import logging
 from typing import Optional
 from enum import Enum
 from abc import ABCMeta, abstractmethod
@@ -9,6 +10,8 @@ from abc import ABCMeta, abstractmethod
 SField = Enum('SField', ('name', 'lot_size', 'stock_type', 'listing_date', 'plate_name', 'plate_id'))
 KField = Enum('KField', ("code", "time_key", "open", "close", "high", "low", "pe_ratio", "atr",
                          "turnover_rate", "volume", "turnover", "change_rate", "last_close"))
+
+logger = logging.getLogger(__name__)
 
 
 class DataHandler(object, metaclass=ABCMeta):
@@ -44,12 +47,16 @@ class DataHandler(object, metaclass=ABCMeta):
     def get_curr_bar(self, symbol) -> pd.Series:
         return self.snapshot.loc[symbol]
 
-    def get_curr_bar_value(self, symbol, field: KField):
+    def get_curr_bar_value(self, symbol, field: KField, rool_back=False):
         """
         Returns one of the Open, High, Low, Close, Volume or OI
         from the last bar.
         """
-        return self.snapshot.loc[symbol, field.name]
+        try:
+            return self.snapshot.loc[symbol, field.name]
+        except KeyError as e:
+            logger.error('cannot find ' + field.name + ' of ' + str(e) + ' in snapshot ...')
+            raise e
 
     @abstractmethod
     def get_hist_bars(self, symbol: str, n: int) -> pd.DataFrame:
