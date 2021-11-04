@@ -1,26 +1,30 @@
+import numpy as np
 from absl import logging, flags, app
 import os
+import cv2
 from typing import Dict
 
 import tensorflow as tf
 from utils import read_vgg16, bilinear
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, BatchNormalization, Conv2DTranspose, ReLU, Softmax
 from tensorflow.keras.losses import MAE
-from data import FrameGenerator
+from data import FrameGenerator, VideoType
 
 FLAGS = flags.FLAGS
 flags.DEFINE_integer('batch_size', 64, 'batch_size')
 flags.DEFINE_integer('num_epoch', 2, 'num epoch')
 flags.DEFINE_integer('num_shift', 17, 'num_shift')
-flags.DEFINE_string('file_name', '/Volumes/data/baidu/Avatar_3D.mkv', 'input movie file_name')
-flags.DEFINE_string('model_dir', os.path.join(os.getcwd(), 'ckpt'), 'input movie file_name')
+# flags.DEFINE_string('file_name', '/Volumes/data/baidu/Avatar_3D.mkv', 'input movie file_name')
+flags.DEFINE_string('file_name', '/Volumes/data/baidu/carrier.mp4', 'input movie file_name')
+flags.DEFINE_string('model_dir', os.path.join(os.getcwd(), '../ckpt'), 'input movie file_name')
 flags.DEFINE_bool('profiler', True, 'whether start profiler')
 
-params = read_vgg16('/Volumes/data/code/deep3d/vgg_16.ckpt')
+params = read_vgg16('/vgg_16.ckpt')
 
 
 def input_fn() -> tf.data.Dataset:
-  gen = FrameGenerator(FLAGS.file_name, num_shift=FLAGS.num_shift, num_epoch=FLAGS.num_epoch)
+  gen = FrameGenerator(FLAGS.file_name, num_shift=FLAGS.num_shift, num_epoch=FLAGS.num_epoch,
+                       video_type=VideoType.SIMPLE)
   dataset = tf.data.Dataset.from_generator(generator=gen, output_signature=gen.signature)
   
   def map_fn(features):
@@ -103,7 +107,13 @@ def model_fn(features: Dict[str, tf.Tensor],
     loss = tf.reduce_mean(MAE(pred, labels))
     return tf.estimator.EstimatorSpec(mode=mode, loss=loss, predictions=pred)
   else:
-    return tf.estimator.EstimatorSpec(mode=mode, predictions=pred)
+    predictions = {
+      'pred': pred,
+      'emit': emit,
+      'origin': features['origin']
+    }
+    
+    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
 
 def main(_):
@@ -112,7 +122,11 @@ def main(_):
     tf.profiler.experimental.server.start(6009)
   config = tf.estimator.RunConfig(save_checkpoints_steps=100, save_summary_steps=20)
   estimator = tf.estimator.Estimator(model_fn=model_fn, model_dir=FLAGS.model_dir, config=config)
-  estimator.train(input_fn=input_fn)
+  
+  for predict in estimator.predict(input_fn=input_fn):
+    for i in range(17):
+      cv2.imshow('pred', np.reshape(predict['emit'], newshape=(predict['emit'].shape[0], -1)))
+      cv2.waitKey(500)
 
 
 if __name__ == '__main__':

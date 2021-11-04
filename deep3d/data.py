@@ -7,8 +7,9 @@ from collections import namedtuple
 
 
 class VideoType(Enum):
-  LR3D = 1
-  UD3D = 2
+  SIMPLE = 1
+  LR3D = 2
+  UD3D = 3
 
 
 Shape = namedtuple("Shape", 'high width')
@@ -55,6 +56,9 @@ class FrameGenerator(object):
   @property
   def signature(self) -> Dict[str, tf.TensorSpec]:
     return {
+      'origin': tf.TensorSpec(shape=(
+        int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH)), 1), dtype=tf.dtypes.uint8),
       'left': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
       'shifted': tf.TensorSpec(shape=(self.height, self.width, self._num_shift), dtype=tf.dtypes.uint8),
       'right': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
@@ -84,16 +88,20 @@ class FrameGenerator(object):
       else:
         raise StopIteration
     
+    result = {}
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    result['origin'] = np.expand_dims(gray.copy(), axis=2)
     gray = cv2.resize(gray, dsize=(self._resize.width, self._resize.high))
     inner_high, inner_width = gray.shape
     
     if self._video_type == VideoType.LR3D:
       split = int(inner_width / 2)
       left, right = gray[:, 0:split], gray[:, split:inner_width]
-    else:
+    elif self._video_type == VideoType.UD3D:
       split = int(inner_high / 2)
       left, right = gray[0:split, :], gray[split:inner_high, :]
+    else:
+      left, right = gray, gray.copy()
     
     height, width = left.shape
     shifted = np.zeros(shape=(height, width, self._num_shift), dtype=left.dtype)
@@ -107,12 +115,14 @@ class FrameGenerator(object):
     
     left, right = np.expand_dims(left, axis=2), np.expand_dims(right, axis=2)
     
-    return {
+    result.update({
       'left': left,
       'shifted': shifted,
       'right': right
-    }
+    })
+    return result
   
   def __call__(self):
     # for tf.data.Dataset.from_generator
     return self
+

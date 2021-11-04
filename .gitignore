@@ -1,13 +1,15 @@
-.idea
-.idea/*
-stockstar.iml
-*.xml
-*.pyc
-
-.vscode
-.ipynb_checkpoints
-.env
-
+.clwb
+.idea/
 .DS_Store
-*.db
+
+ckpt
+ckpt0
+ckpt1
+ckpt2
+vgg_16.ckpt
+
+bazel-bin
+bazel-deep3d
+bazel-out
+bazel-testlogs
 
