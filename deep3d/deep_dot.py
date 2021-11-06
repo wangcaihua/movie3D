@@ -22,10 +22,10 @@ def _deep_dot_grad(op, grad):
 
 
 @tf.custom_gradient
-def deep_fuse(origin: tf.Tensor, kernel: tf.Tensor, kernel_size: int):
+def deep_fuse(origin: tf.Tensor = None, kernel: tf.Tensor = None, kernel_size: int = None):
     composed = deep_dot_lib.deep_dot(origin=origin, kernel=kernel, kernel_size=kernel_size)
 
-    def grad(dy):
+    def grad(dy: tf.Tensor = None):
         [grad_origin, grad_kernel] = deep_dot_lib.grad_deep_dot(
             grad_composed=dy, origin=origin, kernel=kernel, kernel_size=kernel_size)
         return [grad_origin, grad_kernel]

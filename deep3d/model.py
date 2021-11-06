@@ -14,7 +14,7 @@ from deep3d.deep_dot import deep_fuse, deep_dot
 FLAGS = flags.FLAGS
 flags.DEFINE_integer('batch_size', 64, 'batch_size')
 flags.DEFINE_integer('num_epoch', 1, 'num epoch')
-flags.DEFINE_integer('depth_ks', 5, 'depth_ks')
+flags.DEFINE_integer('depth_ks', 4, 'depth_ks')
 flags.DEFINE_string('file_name', '/Volumes/data/baidu/Avatar_3D.mkv', 'input movie file_name')
 # flags.DEFINE_string('file_name', '/Volumes/data/baidu/carrier.mp4', 'input movie file_name')
 flags.DEFINE_string('model_dir', '/Users/fitz/data/code/deep3d/ckpt', 'input movie file_name')
@@ -24,8 +24,7 @@ params = read_vgg16('/Users/fitz/data/code/deep3d/vgg_16.ckpt')
 
 
 def input_fn() -> tf.data.Dataset:
-  logging.info('go to input_fn')
-  gen = FrameGenerator(FLAGS.file_name, num_epoch=FLAGS.num_epoch, video_type=VideoType.SIMPLE)
+  gen = FrameGenerator(FLAGS.file_name, num_epoch=FLAGS.num_epoch, video_type=VideoType.LR3D)
   dataset = tf.data.Dataset.from_generator(generator=gen, output_signature=gen.signature)
 
   def map_fn(features):
@@ -125,5 +124,5 @@ def main(_):
 
 
 if __name__ == '__main__':
-  # tf.compat.v1.disable_eager_execution()
+  tf.compat.v1.disable_eager_execution()
   app.run(main)
