@@ -22,8 +22,8 @@ http_archive(
 # Create a central external repo, @my_deps, that contains Bazel targets for all the
 # third-party packages specified in the requirements.txt file.
 # pip_install(
-#    name = "my_deps",
-#    requirements = "//path/to:requirements.txt",
+#    name = "py_deps",
+#    requirements = "third_party/py_deps/requirements.txt",
 # )
 
 # python -c "import tensorflow as tf; print(tf.sysconfig.get_include())"

@@ -13,3 +13,4 @@ bazel-deep3d
 bazel-out
 bazel-testlogs
 
+deep3d/__pycache__

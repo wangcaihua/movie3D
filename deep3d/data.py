@@ -19,7 +19,6 @@ class FrameGenerator(object):
   def __init__(self,
                video_file_name: str,
                video_type: VideoType = VideoType.LR3D,
-               num_shift: int = 17,
                num_epoch: int = 1,
                resize: Shape = Shape(256, 448)):
     self._video_file_name = video_file_name
@@ -28,10 +27,10 @@ class FrameGenerator(object):
     self._cur_epoch = 1
     self._num_epoch = num_epoch
     self._resize = resize
-    
-    assert int(num_shift / 4) * 4 + 1 == num_shift
-    self._num_shift = num_shift
-  
+
+    self.previous2 = np.zeros(shape=(self.height, self.width), dtype=np.uint8)
+    self.previous1 = np.zeros(shape=(self.height, self.width), dtype=np.uint8)
+
   @property
   def height(self):
     assert self._vc is not None and self._vc.isOpened()
@@ -39,7 +38,7 @@ class FrameGenerator(object):
       return int(self._resize.high / 2)
     else:
       return int(self._resize.high)
-  
+
   @property
   def width(self):
     assert self._vc is not None and self._vc.isOpened()
@@ -47,36 +46,44 @@ class FrameGenerator(object):
       return int(self._resize.width / 2)
     else:
       return int(self._resize.width)
-  
+
   @property
   def fps(self):
     assert self._vc is not None and self._vc.isOpened()
     return int(self._vc.get(propId=cv2.CAP_PROP_FPS)) + 1
-  
+
   @property
   def signature(self) -> Dict[str, tf.TensorSpec]:
+    if self._video_type == VideoType.LR3D:
+      origin_width = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
+    else:
+      origin_width = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH))
+
+    if self._video_type == VideoType.UD3D:
+      origin_height = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT) / 2)
+    else:
+      origin_height = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
     return {
-      'origin': tf.TensorSpec(shape=(
-        int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-        int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH)), 1), dtype=tf.dtypes.uint8),
+      'origin': tf.TensorSpec(shape=(origin_height, origin_width, 3), dtype=tf.dtypes.uint8),
       'left': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
-      'shifted': tf.TensorSpec(shape=(self.height, self.width, self._num_shift), dtype=tf.dtypes.uint8),
       'right': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
+      'feature': tf.TensorSpec(shape=(self.height, self.width, 3), dtype=tf.dtypes.uint8),
     }
-  
+
   def __enter__(self) -> 'FrameGenerator':
     return self
-  
+
   def __exit__(self, exc_type, exc_val, exc_tb):
     self._vc.release()
-  
+
   def __iter__(self):
     return self
-  
+
   def __next__(self) -> Dict[str, np.ndarray]:
     if not self._vc.isOpened():
       raise StopIteration
-    
+
     ret, frame = self._vc.read()
     if not ret:
       if self._cur_epoch < self._num_epoch:
@@ -87,42 +94,40 @@ class FrameGenerator(object):
         self._cur_epoch += 1
       else:
         raise StopIteration
-    
+
     result = {}
+    if self._video_type == VideoType.SIMPLE:
+      result['origin'] = frame
+    elif self._video_type == VideoType.LR3D:
+      split = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
+      result['origin'] = frame[:, :split, :]
+    else:
+      split = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT) / 2)
+      result['origin'] = frame[:split, :, :]
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    result['origin'] = np.expand_dims(gray.copy(), axis=2)
     gray = cv2.resize(gray, dsize=(self._resize.width, self._resize.high))
     inner_high, inner_width = gray.shape
-    
+
     if self._video_type == VideoType.LR3D:
       split = int(inner_width / 2)
-      left, right = gray[:, 0:split], gray[:, split:inner_width]
+      left, right = gray[:, :split], gray[:, split:inner_width]
     elif self._video_type == VideoType.UD3D:
       split = int(inner_high / 2)
-      left, right = gray[0:split, :], gray[split:inner_high, :]
+      left, right = gray[:split, :], gray[split:inner_high, :]
     else:
       left, right = gray, gray.copy()
-    
-    height, width = left.shape
-    shifted = np.zeros(shape=(height, width, self._num_shift), dtype=left.dtype)
-    shifted[:, :, 0] = left[:, :]
-    
-    for offset in range(1, int(self._num_shift / 4) + 1):
-      shifted[:(height - offset), :, (offset - 1) * 4 + 1] = left[offset:, :]  # up
-      shifted[offset:, :, (offset - 1) * 4 + 2] = left[:(height - offset), :]  # down
-      shifted[:, :(width - offset), (offset - 1) * 4 + 3] = left[:, offset:]  # left
-      shifted[:, (width - offset):, (offset - 1) * 4 + 4] = left[:, :offset]  # right
-    
+    feature = np.stack([left, self.previous1, self.previous2], axis=2)
+    self.previous1, self.previous2 = left.copy(), self.previous1
     left, right = np.expand_dims(left, axis=2), np.expand_dims(right, axis=2)
-    
+
     result.update({
       'left': left,
-      'shifted': shifted,
-      'right': right
+      'right': right,
+      'feature': feature
     })
     return result
-  
+
   def __call__(self):
     # for tf.data.Dataset.from_generator
     return self
-

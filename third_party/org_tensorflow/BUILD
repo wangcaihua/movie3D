@@ -5,6 +5,6 @@ cc_library(
     name = "tensorflow_framework",
     hdrs = glob(["include/**"]),
     srcs = ["libtensorflow_framework.dylib"],
-    includes = glob(["include/**"]),
+    # includes = glob(["include/**"]),
     visibility = ["//visibility:public"],
 )

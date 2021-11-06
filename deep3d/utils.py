@@ -20,10 +20,7 @@ def read_vgg16(ckpt_path: str):
       for var_name in ['weights', 'biases']:
         key = f'vgg_16/conv{block_id}/conv{block_id}_{layer_id}/{var_name}'
         name = f'conv{block_id}_{layer_id}/{var_name}'
-        if block_id == 1 and layer_id == 1 and var_name == 'weights':
-          params[name] = np.mean(reader.get_tensor(key), axis=2, keepdims=True)
-        else:
-          params[name] = reader.get_tensor(key)
+        params[name] = reader.get_tensor(key)
   
   return params
 

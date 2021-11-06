@@ -1,17 +1,33 @@
+import os
 import tensorflow as tf
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import load_library
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+deep_dot_lib = load_library.load_op_library('deep3d/tf_deep_dot.so')
 
 
-decode_param_op_module = tf.load_op_library('deep_dot.so')
+def deep_dot(origin: tf.Tensor, kernel: tf.Tensor, kernel_size: int) -> tf.Tensor:
+    return deep_dot_lib.deep_dot(origin=origin, kernel=kernel, kernel_size=kernel_size)
 
 
-def decode_with_param(inputs, sequence_length, beam_width=100,
-                   top_paths=1, merge_repeated=True):
-    decoded_ixs, decoded_vals, decoded_shapes, log_probabilities = (
-        decode_param_op_module.ctc_beam_search_decoder_with_param(
-            inputs, sequence_length, beam_width=beam_width,
-            top_paths=top_paths, merge_repeated=merge_repeated,
-            label_selection_size=40, label_selection_margin=0.99))
-    return (
-        [tf.SparseTensor(ix, val, shape) for (ix, val, shape)
-         in zip(decoded_ixs, decoded_vals, decoded_shapes)],
-        log_probabilities)
+@ops.RegisterGradient('DeepDot')
+def _deep_dot_grad(op, grad):
+    origin, kernel = op.inputs[0], op.inputs[1]
+    kernel_size = op.get_attr('kernel_size')
+
+    [grad_origin, grad_kernel] = deep_dot_lib.grad_deep_dot(
+        grad_composed=grad, origin=origin, kernel=kernel, kernel_size=kernel_size)
+    return [grad_origin, grad_kernel]
+
+
+@tf.custom_gradient
+def deep_fuse(origin: tf.Tensor, kernel: tf.Tensor, kernel_size: int):
+    composed = deep_dot_lib.deep_dot(origin=origin, kernel=kernel, kernel_size=kernel_size)
+
+    def grad(dy):
+        [grad_origin, grad_kernel] = deep_dot_lib.grad_deep_dot(
+            grad_composed=dy, origin=origin, kernel=kernel, kernel_size=kernel_size)
+        return [grad_origin, grad_kernel]
+
+    return composed, grad
