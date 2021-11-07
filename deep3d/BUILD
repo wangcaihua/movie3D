@@ -44,3 +44,8 @@ py_binary(
     ]
 )
 
+py_binary(
+    name='compose',
+    srcs = ['compose.py'],
+)
+

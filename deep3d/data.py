@@ -12,6 +12,11 @@ class VideoType(Enum):
   UD3D = 3
 
 
+class OriginType(Enum):
+  GRAY = 1
+  COLOR = 2
+
+
 Shape = namedtuple("Shape", 'high width')
 
 
@@ -20,13 +25,15 @@ class FrameGenerator(object):
                video_file_name: str,
                video_type: VideoType = VideoType.LR3D,
                num_epoch: int = 1,
-               resize: Shape = Shape(256, 448)):
+               resize: Shape = Shape(256, 448),
+               origin_type: OriginType = OriginType.COLOR):
     self._video_file_name = video_file_name
     self._vc = cv2.VideoCapture(video_file_name)
     self._video_type = video_type
     self._cur_epoch = 1
     self._num_epoch = num_epoch
     self._resize = resize
+    self._origin_type = origin_type
 
     self.previous2 = np.zeros(shape=(self.height, self.width), dtype=np.uint8)
     self.previous1 = np.zeros(shape=(self.height, self.width), dtype=np.uint8)
@@ -53,6 +60,14 @@ class FrameGenerator(object):
     return int(self._vc.get(propId=cv2.CAP_PROP_FPS)) + 1
 
   @property
+  def fourcc(self):
+    return int(self._vc.get(cv2.CAP_PROP_FOURCC))
+
+  @property
+  def origin_size(self):
+    return int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH))
+
+  @property
   def signature(self) -> Dict[str, tf.TensorSpec]:
     if self._video_type == VideoType.LR3D:
       origin_width = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
@@ -65,7 +80,8 @@ class FrameGenerator(object):
       origin_height = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     return {
-      'origin': tf.TensorSpec(shape=(origin_height, origin_width, 3), dtype=tf.dtypes.uint8),
+      'origin': tf.TensorSpec(shape=(origin_height, origin_width,
+                                     3 if self._origin_type == OriginType.COLOR else 1), dtype=tf.dtypes.uint8),
       'left': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
       'right': tf.TensorSpec(shape=(self.height, self.width, 1), dtype=tf.dtypes.uint8),
       'feature': tf.TensorSpec(shape=(self.height, self.width, 3), dtype=tf.dtypes.uint8),
@@ -96,16 +112,26 @@ class FrameGenerator(object):
         raise StopIteration
 
     result = {}
-    if self._video_type == VideoType.SIMPLE:
-      result['origin'] = frame
-    elif self._video_type == VideoType.LR3D:
-      split = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
-      result['origin'] = frame[:, :split, :]
-    else:
-      split = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT) / 2)
-      result['origin'] = frame[:split, :, :]
-
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if self._origin_type == OriginType.COLOR:
+      if self._video_type == VideoType.SIMPLE:
+        result['origin'] = frame
+      elif self._video_type == VideoType.LR3D:
+        split = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
+        result['origin'] = frame[:, :split, :]
+      else:
+        split = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT) / 2)
+        result['origin'] = frame[:split, :, :]
+    else:
+      if self._video_type == VideoType.SIMPLE:
+        result['origin'] = np.expand_dims(gray, axis=2)
+      elif self._video_type == VideoType.LR3D:
+        split = int(self._vc.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
+        result['origin'] = np.expand_dims(gray[:, :split])
+      else:
+        split = int(self._vc.get(cv2.CAP_PROP_FRAME_HEIGHT) / 2)
+        result['origin'] = np.expand_dims(gray[:split, :])
+
     gray = cv2.resize(gray, dsize=(self._resize.width, self._resize.high))
     inner_high, inner_width = gray.shape
 
