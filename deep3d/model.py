@@ -180,7 +180,7 @@ def main(_):
           start = int((width - real_width) / 2)
           end = start + real_width
           new_origin = origin[:, start:end, :]
-          new_origin_pred = origin[:, start:end, :]
+          new_origin_pred = origin_pred[:, start:end, :]
         else:
           real_height = int(height / ratio)
           start = int((real_height - height) / 2)
